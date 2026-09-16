@@ -1,0 +1,33 @@
+# Build artifacts (qmake-generated Makefiles, object files, binaries)
+Makefile
+*.o
+*.a
+debug/
+release/
+.qmake.stash
+
+# moc/uic generated sources
+moc_*.cpp
+moc_predefs.h
+ui_*.h
+
+# editor swap files
+*.swp
+
+# example binaries (no extension, one per examples/*/*/ subdir)
+examples/*/*/vec
+examples/*/*/quat
+examples/*/*/point
+examples/*/*/bb
+examples/*/*/pca
+examples/*/*/linalg
+examples/*/*/tsp
+examples/*/*/problem
+examples/*/*/cube
+examples/*/*/iso
+examples/*/*/level
+examples/*/*/maubach
+examples/*/*/radial
+examples/*/*/ziegler_lc
+examples/*/*/ziegler_vc
+apps/isoview/isoview

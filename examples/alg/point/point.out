@@ -1,0 +1,8 @@
+a=1 1
+b=2 1
+c=2 2
+a+3*(b-c)=1 -2
+bracket(a,b,c)=1
+p=barycenter(a,b,c)=1.66667 1.33333
+q=barycentric_coordinates(p|a,b,c)=0.333333 0.333333 0.333333
+barycentric_combination(q|a,b,c)=1.66667 1.33333
