@@ -117,13 +117,38 @@ triangle, as up to **two** points (`F` has degree `n` in `w`, so a
 triangle's `w`-span can still straddle more than one root even after
 refinement -- `branch_gap` bounds how close two roots get, not
 whether a given triangle spans two of them). Each root is sought by
-2D Newton on the barycentric coordinates, seeded first from the
-closed-form solution of the *linear* interpolation of `F` at the 3
-vertices (exact for a linear field -- the affine analogue of the
-edge-crossing linear interpolation used in marching tetrahedra), then
-from 7 fixed seeds spread over the triangle, both to catch a second
-sheet the linear seed misses and as a fallback when the linear seed
-is degenerate. Distinct converged roots are cached per triangle.
+2D Newton (`newton_on_triangle`), seeded first from the closed-form
+solution of the *linear* interpolation of `F` at the 3 vertices (exact
+for a linear field -- the affine analogue of the edge-crossing linear
+interpolation used in marching tetrahedra), then from 7 fixed seeds
+spread over the triangle, both to catch a second sheet the linear seed
+misses and as a fallback when the linear seed is degenerate. Distinct
+converged roots are cached per triangle.
+
+The Newton iteration itself runs in a **local orthogonal frame**
+(`tri_frame`/`build_tri_frame`), not raw barycentric coordinates: `x`
+along the triangle's longest side, `y` along the perpendicular dropped
+from the opposite vertex (its foot `Po` lands strictly inside the
+longest side, since the angles at its two endpoints are the triangle's
+two smallest). Raw barycentric edge vectors `(w1-w0,z1-z0)` and
+`(w2-w0,z2-z0)` can be near-parallel for a needle-shaped triangle,
+ill-conditioning the Jacobian through the parametrization alone,
+independent of `F`; the longest-side frame's two basis directions are
+genuinely orthogonal (in the real inner product on `C^2 = R^4`) and
+scaled to the triangle's own extent, removing that source of
+ill-conditioning. Seeds are converted barycentric-to-frame
+(`bary_to_xy`) before iterating, and the result is converted back to
+barycentric coordinates (w.r.t. the triangle's original vertex order)
+immediately after convergence, so the domain/boundary check and
+`compute_crossing_node`'s use of `face_op` indexing are unaffected --
+the frame is purely an internal conditioning device. (This is a real,
+not complex/holomorphic, change of coordinates: an earlier idea to
+reparametrize by a single complex variable `x+iy` so each triangle's
+crossings could be found by a closed-form/Durand-Kerner polynomial
+solve turned out not to work in general -- restricting `F` to an
+arbitrary real 2-plane in `C^2` is holomorphic in `x+iy` only when that
+plane happens to be a complex line, which is not the generic case for
+a mesh triangle.)
 
 Each crossing point is given a **canonical identity**
 (`compute_crossing_node`) based on *where* it sits on the ambient

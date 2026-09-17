@@ -352,37 +352,99 @@ double cell_priority(const T& t, Cell(T) cv) {
 	return wdiam/(mingap+1e-12);
 }
 
-// Newton's method for F(w(l),z(l))=0 on a 2-simplex's affine chart
-// w(l)=l0 w0+l1 w1+l2 w2, z(l)=l0 z0+l1 z1+l2 z2 (l0=1-l1-l2), from a
-// given barycentric seed (l1,l2). Returns true iff it converges to a
-// point inside (or numerically on the boundary of) the triangle.
+// Real inner product of two complex numbers viewed as vectors in R^2
+// (Re a*Re b + Im a*Im b) -- used below to build a genuinely orthogonal
+// real frame for a triangle living in C^2 = R^4 (dot product of a
+// (w,z)-pair is this applied to each component and summed).
+double real_dot(cx a, cx b) { return a.real()*b.real()+a.imag()*b.imag(); }
+
+// Per-triangle local frame: x runs along the triangle's longest side, y
+// along the perpendicular dropped from the opposite vertex. Because the
+// side is chosen to be the *longest*, the foot of that perpendicular
+// (Po) lands strictly inside it (the angles at its two endpoints are the
+// triangle's two smallest, hence acute) -- so this is a well-defined,
+// genuinely orthogonal decomposition of the triangle's affine plane,
+// with both basis directions scaled to the triangle's own extent. This
+// is used only to condition the Newton iteration below: raw barycentric
+// edge vectors (w1-w0,z1-z0),(w2-w0,z2-z0) can be near-parallel/skewed
+// for a needle-shaped triangle and ill-condition its Jacobian through
+// the parametrization alone, independent of F. (It is not a complex/
+// holomorphic reparametrization -- see the discussion that ruled that
+// out -- just a better-conditioned real one.)
+struct tri_frame {
+	int io, ip, iq;     // indices (0,1,2) of the opposite / longest-side vertices
+	cx Pow, Poz;        // foot of the perpendicular, Po
+	cx Xw, Xz, Yw, Yz;  // frame directions: Xdir=Pq-Po, Ydir=Popp-Po
+	double xp;          // x-coordinate of vertex p (the other long-side endpoint)
+};
+
+void
+build_tri_frame(const cx w[3], const cx z[3], tri_frame& fr) {
+	double d01=std::norm(w[1]-w[0])+std::norm(z[1]-z[0]);
+	double d12=std::norm(w[2]-w[1])+std::norm(z[2]-z[1]);
+	double d02=std::norm(w[2]-w[0])+std::norm(z[2]-z[0]);
+	if(d01>=d12 && d01>=d02)      { fr.io=2; fr.ip=0; fr.iq=1; }
+	else if(d12>=d01 && d12>=d02) { fr.io=0; fr.ip=1; fr.iq=2; }
+	else                          { fr.io=1; fr.ip=0; fr.iq=2; }
+	cx dw=w[fr.iq]-w[fr.ip], dz=z[fr.iq]-z[fr.ip];
+	cx ow=w[fr.io]-w[fr.ip], oz=z[fr.io]-z[fr.ip];
+	double denom=real_dot(dw,dw)+real_dot(dz,dz);
+	double t=(denom>1e-300) ? (real_dot(ow,dw)+real_dot(oz,dz))/denom : 0.5;
+	fr.Pow=w[fr.ip]+t*dw; fr.Poz=z[fr.ip]+t*dz;
+	fr.Xw=w[fr.iq]-fr.Pow; fr.Xz=z[fr.iq]-fr.Poz;
+	fr.Yw=w[fr.io]-fr.Pow; fr.Yz=z[fr.io]-fr.Poz;
+	double denom2=1.0-t;
+	fr.xp=(fabs(denom2)>1e-9) ? -t/denom2 : -1e9;
+}
+
+// Barycentric (w.r.t. the triangle's original vertex order 0,1,2) ->
+// frame (x,y): both are affine parametrizations of the same plane, so
+// x,y are themselves affine (in fact linear) in l0,l1,l2, fixed by their
+// values at the 3 vertices (x,y)=(0,1) at "o", (xp,0) at "p", (1,0) at "q".
+void
+bary_to_xy(const tri_frame& fr, double l1, double l2, double& x, double& y) {
+	double l[3]={1.0-l1-l2,l1,l2};
+	y=l[fr.io];
+	x=l[fr.ip]*fr.xp+l[fr.iq];
+}
+
+// Newton's method for F(w(x,y),z(x,y))=0 in the triangle's local
+// orthogonal frame (see tri_frame above), from a given seed. Converts
+// back to barycentric coordinates (w.r.t. the original vertex order) at
+// the end, so callers and the domain/boundary check are unaffected by
+// the frame used internally.
 bool
-newton_on_triangle(cx w0, cx w1, cx w2, cx z0, cx z1, cx z2,
-										double l1, double l2, double& out_l1, double& out_l2) {
+newton_on_triangle(const tri_frame& fr, double x, double y, double& out_l1, double& out_l2) {
 	for(int iter=0; iter<20; ++iter) {
-		double l0=1.0-l1-l2;
-		cx w=l0*w0+l1*w1+l2*w2;
-		cx z=l0*z0+l1*z1+l2*z2;
+		cx w=fr.Pow+x*fr.Xw+y*fr.Yw;
+		cx z=fr.Poz+x*fr.Xz+y*fr.Yz;
 		cx Fv=F(w,z);
 		if(std::norm(Fv)<1e-24) break;
 		cx fw=Fw(w,z), fz=Fz(w,z);
-		cx c1=fw*(w1-w0)+fz*(z1-z0);
-		cx c2=fw*(w2-w0)+fz*(z2-z0);
-		double j00=c1.real(), j01=c2.real(), j10=c1.imag(), j11=c2.imag();
+		cx cX=fw*fr.Xw+fz*fr.Xz;
+		cx cY=fw*fr.Yw+fz*fr.Yz;
+		double j00=cX.real(), j01=cY.real(), j10=cX.imag(), j11=cY.imag();
 		double jdet=j00*j11-j01*j10;
 		if(fabs(jdet)<1e-300) return false;
 		double g0=Fv.real(), g1=Fv.imag();
-		l1-=(g0*j11-j01*g1)/jdet;
-		l2-=(j00*g1-g0*j10)/jdet;
-		if(fabs(l1)>1e4||fabs(l2)>1e4) return false; // diverged
+		x-=(g0*j11-j01*g1)/jdet;
+		y-=(j00*g1-g0*j10)/jdet;
+		if(fabs(x)>1e6||fabs(y)>1e6) return false; // diverged
 	}
-	double l0=1.0-l1-l2;
-	cx w=l0*w0+l1*w1+l2*w2;
-	cx z=l0*z0+l1*z1+l2*z2;
+	cx w=fr.Pow+x*fr.Xw+y*fr.Yw;
+	cx z=fr.Poz+x*fr.Xz+y*fr.Yz;
 	if(std::norm(F(w,z))>1e-20) return false;
+
+	double l[3];
+	l[fr.io]=y;
+	double denom=fr.xp-1.0;
+	double lp=(fabs(denom)>1e-12) ? (x-(1.0-y))/denom : 0.0;
+	l[fr.ip]=lp;
+	l[fr.iq]=1.0-y-lp;
+
 	const double dom_tol=1e-6;
-	if(l0<-dom_tol||l0>1+dom_tol||l1<-dom_tol||l1>1+dom_tol||l2<-dom_tol||l2>1+dom_tol) return false;
-	out_l1=l1; out_l2=l2;
+	if(l[0]<-dom_tol||l[0]>1+dom_tol||l[1]<-dom_tol||l[1]>1+dom_tol||l[2]<-dom_tol||l[2]>1+dom_tol) return false;
+	out_l1=l[1]; out_l2=l[2];
 	return true;
 }
 
@@ -435,9 +497,13 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 	};
 	for(int s=0;s<7;++s) { seeds[nseeds][0]=extra_seeds[s][0]; seeds[nseeds][1]=extra_seeds[s][1]; ++nseeds; }
 
+	tri_frame fr;
+	{ cx w3[3]={w0,w1,w2}, z3[3]={z0,z1,z2}; build_tri_frame(w3,z3,fr); }
+
 	for(int s=0; s<nseeds && d->nroots<2; ++s) {
+		double sx,sy; bary_to_xy(fr,seeds[s][0],seeds[s][1],sx,sy);
 		double ol1,ol2;
-		if(!newton_on_triangle(w0,w1,w2,z0,z1,z2,seeds[s][0],seeds[s][1],ol1,ol2)) continue;
+		if(!newton_on_triangle(fr,sx,sy,ol1,ol2)) continue;
 		bool dup=false;
 		for(int r=0;r<d->nroots;++r)
 			if(fabs(d->l1[r]-ol1)<1e-7 && fabs(d->l2[r]-ol2)<1e-7) dup=true;
