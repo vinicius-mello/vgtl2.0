@@ -579,14 +579,59 @@ same_crossing_node(const crossing_node& a, const crossing_node& b) {
 	return true;
 }
 
+// Forward stereographic projection, C_infty -> sphere: the inverse of
+// from_sphere(). w=0 -> south pole (0,0,-1), |w|->infty -> north pole
+// (0,0,1). Used only by the "onion" visualization mode below -- the
+// mesh/Newton/refinement machinery only ever goes the other way.
+vec<3,double> to_sphere(cx w) {
+	double n=std::norm(w); // |w|^2
+	double s=n+1.0;
+	vec<3,double> p;
+	p[0]=2.0*w.real()/s; p[1]=2.0*w.imag()/s; p[2]=(n-1.0)/s;
+	return p;
+}
+
+// Radial displacement for the "onion" projection: a fixed-angle
+// projection of w's own stereographic image onto a generic direction in
+// the (x,y) plane of its sphere, bounded to [-1,1] (points on a unit
+// sphere have x^2+y^2<=1). Deliberately not just Re(w)/... along the raw
+// axis: it needs to separate the sheets found at a given z, and every
+// degree-2 catalog curve so far is of the form w^2=f_0(z), so its two
+// roots are always a +-w pair -- any single linear probe of w already
+// separates that (odd under negation), but picking a non-axis-aligned
+// angle keeps it from being blind to some other curve's symmetry instead
+// (e.g. one invariant under w -> -w but not under reflection through the
+// real axis).
+const double ONION_ANGLE=0.83; // an arbitrary non-special angle (radians)
+double onion_radial(cx w) {
+	vec<3,double> s=to_sphere(w);
+	return std::cos(ONION_ANGLE)*s[0]+std::sin(ONION_ANGLE)*s[1]; // in [-1,1]
+}
+
+bool g_onion=false;
+double g_onion_scale=0.3;
+
 // 4D (w,z) in C_infty^2 -> 3D, for a first look at the extracted
-// surface. This throws away Im(z) entirely, so it's a projection, not
-// an embedding: it can and will show self-intersections that aren't
-// really there. Meant to be swapped out easily once we look at the
-// result -- e.g. stereographic re-embedding on a pair of spheres, a
-// PCA-based projection local to a patch, or coloring points by Im(z)
-// instead of dropping it.
+// surface. Two modes:
+// - flat (default): (Re w, Im w, Re z). Throws away Im(z) entirely, so
+//   it's a projection, not an embedding -- it can and will show
+//   self-intersections that aren't really there.
+// - onion (--onion): place the point by z's position on the sphere
+//   (direction), then displace it perpendicular to that sphere -- i.e.
+//   radially -- by onion_radial(w). For a fixed z, the (up to n) sheets
+//   of the surface then spread into concentric shells instead of
+//   overlapping, showing the branch structure as nested spheres that
+//   pinch together where sheets meet. Also a projection, not an
+//   embedding (w is compressed to one bounded scalar), but a
+//   differently-lossy one.
 vec<3,double> project_for_viz(cx w, cx z) {
+	if(g_onion) {
+		vec<3,double> dir=to_sphere(z);
+		double r=1.0+g_onion_scale*onion_radial(w);
+		vec<3,double> p;
+		for(int i=0;i<3;++i) p[i]=r*dir[i];
+		return p;
+	}
 	vec<3,double> p;
 	p[0]=w.real(); p[1]=w.imag(); p[2]=z.real();
 	return p;
@@ -603,7 +648,11 @@ struct obj_writer {
 	ofstream out;
 	int nverts, nfaces;
 	obj_writer(const char* path) : out(path), nverts(0), nfaces(0) {
-		out<<"# Riemann surface extraction, projected via (Re w, Im w, Re z)\n";
+		if(g_onion)
+			out<<"# Riemann surface extraction, onion projection: "
+				<<"direction=z on S^2, radius=1+"<<g_onion_scale<<"*onion_radial(w)\n";
+		else
+			out<<"# Riemann surface extraction, projected via (Re w, Im w, Re z)\n";
 	}
 	void write_polygon(const vector<crossing_node>& nodes, const vector<int>& cyc) {
 		for(size_t i=0;i<cyc.size();++i) {
@@ -635,6 +684,10 @@ int main(int argc, char* argv[]) {
 			threshold=atof(argv[++i]);
 		} else if(arg=="--function" && i+1<argc) {
 			function_index=atoi(argv[++i]);
+		} else if(arg=="--onion") {
+			g_onion=true;
+		} else if(arg=="--onion-scale" && i+1<argc) {
+			g_onion_scale=atof(argv[++i]);
 		} else if(arg=="--list-functions") {
 			cout<<"available functions:"<<endl;
 			print_function_catalog(cout);
@@ -642,7 +695,7 @@ int main(int argc, char* argv[]) {
 		} else {
 			cerr<<"unrecognized argument: "<<arg<<endl;
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--generic] [--depth N] "
-					<<"[--threshold X] [--list-functions]"<<endl;
+					<<"[--threshold X] [--onion] [--onion-scale X] [--list-functions]"<<endl;
 			return 1;
 		}
 	}
@@ -658,12 +711,15 @@ int main(int argc, char* argv[]) {
 			<<catalog[function_index].description<<endl;
 	cout<<"coordinates: "<<(g_generic_coords?"generic (rotated+translated)":"aligned (original)")<<endl;
 	cout<<"max_depth="<<max_depth<<" threshold="<<threshold<<endl;
+	cout<<"projection: "<<(g_onion?"onion":"flat");
+	if(g_onion) cout<<" (scale="<<g_onion_scale<<")";
+	cout<<endl;
 
-	// Named after the curve and coordinate mode so runs over different
-	// --function/--generic combinations never silently overwrite each
-	// other's output.
+	// Named after the curve, coordinate mode and projection so runs over
+	// different --function/--generic/--onion combinations never silently
+	// overwrite each other's output.
 	string obj_path_s="riemann_surface_"+catalog[function_index].name
-		+(g_generic_coords?"_generic":"")+".obj";
+		+(g_generic_coords?"_generic":"")+(g_onion?"_onion":"")+".obj";
 	const char* obj_path=obj_path_s.c_str();
 
 	// One combined vertex per (w-label, z-label) pair.
@@ -1029,7 +1085,7 @@ int main(int argc, char* argv[]) {
 	cout<<"touching tetrahedra (single point, no edge): "<<ntouching_tets<<endl;
 	cout<<"tetrahedra with an unhandled node count: "<<nbad_tets<<endl;
 	cout<<"wrote "<<obj_path<<": "<<obj.nverts<<" vertices, "<<obj.nfaces<<" faces "
-			<<"(projection: Re(w), Im(w), Re(z))"<<endl;
+			<<"(projection: "<<(g_onion?"onion, z on S^2 + radial w":"Re(w), Im(w), Re(z)")<<")"<<endl;
 	cout<<"|F|^2 residual at extracted nodes, range: ["<<fres_min<<", "<<fres_max<<"]"<<endl;
 
 	cout<<"ok/bad cells by cell level:"<<endl;

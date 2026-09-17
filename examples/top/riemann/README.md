@@ -173,12 +173,30 @@ each cycle becomes one output polygon.
 ### Phase 4 -- projection and export
 
 The extracted polygons are projected from `(w,z) ∈ C_∞^2` (real
-dimension 4) down to 3D via `project_for_viz`: currently
-`(Re w, Im w, Re z)`. This drops `Im z` entirely, so it is a
-*projection*, not an embedding -- it will show self-intersections
-that are not really there. The function is deliberately isolated so
-other projections (stereographic re-embedding, a local PCA-based
-projection, coloring by the dropped coordinate) are easy to try.
+dimension 4) down to 3D via `project_for_viz`, in one of two modes.
+Both are lossy projections, not embeddings -- each can and will show
+self-intersections that are not really there.
+
+- **flat** (default): `(Re w, Im w, Re z)`. Drops `Im z` entirely.
+- **onion** (`--onion`): direction from `z`'s own position on the
+  sphere (`to_sphere(z)`, the forward stereographic projection --
+  inverse of `from_sphere`), displaced *perpendicular to that sphere*
+  (i.e. radially) by `1 + scale*onion_radial(w)`. `onion_radial(w)` is
+  a fixed-angle projection of `w`'s own stereographic image onto a
+  generic direction, bounded to `[-1,1]` -- deliberately not the raw
+  `Re(w)` axis, so it isn't blind to some future curve's symmetry other
+  than `w -> -w` (every degree-2 catalog curve so far is `w^2=f_0(z)`,
+  whose two roots are always a `+-w` pair; a fixed generic angle
+  separates that case and generalizes better to others). For a fixed
+  `z`, the (up to `n`) sheets of the surface spread into concentric
+  shells instead of overlapping -- the branch structure becomes visible
+  as nested spheres that pinch together where sheets meet. `--onion-scale
+  X` (default `0.3`) sets the radial spread; output radius stays within
+  `[1-X, 1+X]` by construction.
+
+`project_for_viz` is deliberately isolated so other projections
+(a local PCA-based projection, coloring by a dropped coordinate) are
+easy to add as a third mode.
 
 `obj_writer` writes one OBJ face per extracted polygon, with its own
 unwelded vertices (no attempt to merge vertices shared with polygons
@@ -236,7 +254,7 @@ elsewhere -- it must point at VGTL's top-level `include/` directory).
 Run:
 
 ```sh
-./riemann [--function N] [--generic] [--depth N] [--threshold X] [--list-functions]
+./riemann [--function N] [--generic] [--depth N] [--threshold X] [--onion] [--onion-scale X] [--list-functions]
 ```
 
 | flag | default | meaning |
@@ -245,12 +263,14 @@ Run:
 | `--generic` | off | apply a fixed complex-affine change of coordinates to `F` (rotation + translation, `\|a\|=\|c\|=1`) to break curve/mesh symmetry alignment -- see *Known limitations* |
 | `--depth N` | `12` | maximum Maubach subdivision level |
 | `--threshold X` | `0.1` | refinement stops popping cells once the priority queue's max drops below this |
+| `--onion` | off | export via the onion projection (nested spheres) instead of the flat `(Re w, Im w, Re z)` one -- see Phase 4 |
+| `--onion-scale X` | `0.3` | radial spread for `--onion`; output radius stays within `[1-X, 1+X]` |
 | `--list-functions` | -- | print the curve catalog and exit |
 
-Output is `riemann_surface_<name>[_generic].obj` in the working
+Output is `riemann_surface_<name>[_generic][_onion].obj` in the working
 directory (e.g. `riemann_surface_elliptic.obj`,
-`riemann_surface_parabola_generic.obj`), viewable in any standard OBJ
-viewer (Blender, MeshLab, a three.js-based page, ...). Progress and
+`riemann_surface_parabola_generic_onion.obj`), viewable in any standard
+OBJ viewer (Blender, MeshLab, a three.js-based page, ...). Progress and
 diagnostics (mesh invariants, refinement stats, extraction quality,
 residuals) print to stdout -- worth reading; in particular
 `extracted cells: ok=.. bad=..` and the `ok/bad cells by cell level`
