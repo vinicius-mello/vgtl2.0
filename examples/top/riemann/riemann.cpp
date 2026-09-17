@@ -245,25 +245,140 @@ double branch_gap(cx z) {
 	return std::pow(mag, 1.0/(g_F.n*(g_F.n-1)));
 }
 
-// Inverse stereographic projection, sphere -> C_infty. The north pole
-// (point at infinity) is approximated by a large finite value here;
-// this is a placeholder, not a projective treatment, and should be
-// revisited once refinement actually needs to happen near a pole.
+// Inverse stereographic projection, sphere -> C_infty. Blows up at (is a
+// placeholder for) the north pole itself; this chart is only used once a
+// triangle is known not to need the corner treatment below (see
+// triangle_intersection / sphere_is_far).
 cx from_sphere(const vec<3,double>& p) {
 	double denom=1.0-p[2];
 	if(fabs(denom)<1e-12) return cx(1e8,0);
 	return cx(p[0]/denom,p[1]/denom);
 }
 
-// Vertices at/near the 1e8 pole proxy make F and its derivatives
-// overflow into meaningless magnitudes (observed: F ~ 1e16, spurious
-// "roots" accepted by Newton). Since this example's curve never visits
-// a neighborhood of w=infty or z=infty, we simply keep such cells and
-// triangles out of both refinement and extraction rather than doing
-// real arithmetic on the proxy value. A projective (numerator,
-// denominator) treatment would remove the need for this guard.
-const double POLE_CUTOFF=1e6;
-bool near_pole(cx w) { return std::abs(w)>POLE_CUTOFF; }
+// --- Projective treatment of the (w,z) -> (infty,infty) corner --------
+// F is monic in w, so w=infty is never a root of F for finite z: the
+// w-homogenized w'^n F(1/w',z) equals 1 at w'=0. So a vertex near just
+// *one* of the two poles (w far but z finite, or vice versa) is a region
+// this curve family's surface never actually visits -- such triangles
+// stay excluded from extraction, as before. The only place a second
+// chart is actually needed is the *joint* corner where w and z diverge
+// together, which is exactly where every catalog curve closes up (e.g.
+// the elliptic curve's point(s) at infinity).
+
+// 1/w, directly from sphere coordinates (finite everywhere except at the
+// south pole w=0 -- the complementary chart to from_sphere()).
+cx recip_from_sphere(const vec<3,double>& p) {
+	double denom=1.0+p[2];
+	if(fabs(denom)<1e-12) return cx(1e8,0); // w=0 => 1/w=infty placeholder
+	return cx(p[0]/denom,-p[1]/denom);
+}
+
+// The --generic affine transform doesn't commute with a plain 1/w (the
+// translation GB blows the homogenization up), so the "far" variable
+// reciprocates the *already-transformed* coordinate instead:
+// wr = 1/(GA*w+GB) = w'/(GA+GB*w') with w'=1/w -- reduces to w'=1/w when
+// GB=0 (the non-generic default), and stays finite even exactly at
+// w'=0. from_wr/from_zr are the inverse, used once a root is found in
+// this chart, to report it back as an ordinary (possibly huge but
+// finite) (w,z) point for downstream code.
+cx to_wr(cx wprime) { return wprime/(GA+GB*wprime); }
+cx to_zr(cx zprime) { return zprime/(GC+GD*zprime); }
+cx from_wr(cx wr) {
+	if(std::norm(wr)<1e-24) return cx(1e8,0);
+	return (cx(1,0)/wr-GB)/GA;
+}
+cx from_zr(cx zr) {
+	if(std::norm(zr)<1e-24) return cx(1e8,0);
+	return (cx(1,0)/zr-GD)/GC;
+}
+
+// A vertex is "far" (near the north-pole proxy) when the ordinary chart
+// value there is uncomfortably large -- same cutoff and intent as the
+// old near_pole()/POLE_CUTOFF, just checked to decide chart selection
+// rather than to blanket-exclude: a triangle with one modestly-large-w
+// vertex (say |w|~50) and otherwise ordinary vertices is still handled
+// perfectly well by the plain chart (see triangle_intersection), so this
+// must stay a high cutoff -- lowering it would needlessly route (or
+// worse, exclude, if only one of w/z crosses it) triangles the ordinary
+// Newton already solves correctly.
+const double FAR_W_CUTOFF=1e6;
+bool sphere_is_far(const vec<3,double>& p) { return std::abs(from_sphere(p))>FAR_W_CUTOFF; }
+
+cx ipow(cx base, int e) {
+	cx r(1,0);
+	for(int k=0;k<e;++k) r*=base;
+	return r;
+}
+
+// Set once in main() from g_F: the highest z-degree among all f_i(z),
+// needed to homogenize F in z at the corner.
+int g_dz=0;
+
+// f_i(z) reindexed to the corner chart: z^dz * f_i(1/z) with z=1/zr,
+// i.e. f_i "reversed" and padded to degree g_dz -- finite at zr=0 (z=infty).
+cx fi_corner(int i, cx zr) {
+	const vector<cx>& p=g_F.c[i];
+	cx r(0,0);
+	for(int k=(int)p.size()-1;k>=0;--k) r+=p[k]*ipow(zr,g_dz-k);
+	return r;
+}
+cx fi_corner_dz(int i, cx zr) { // d/dzr of fi_corner
+	const vector<cx>& p=g_F.c[i];
+	cx r(0,0);
+	for(int k=0;k<(int)p.size();++k) {
+		int e=g_dz-k;
+		if(e>=1) r+=p[k]*double(e)*ipow(zr,e-1);
+	}
+	return r;
+}
+
+// K(wr,zr) = wr^n * zr^dz * F_raw(1/wr,1/zr): the doubly-homogenized
+// polynomial for the (w,z)->(infty,infty) corner, finite and
+// well-defined at (wr,zr)=(0,0). Its coefficients are exactly g_F.c[][],
+// just reindexed -- no need to re-expand the --generic affine transform
+// symbolically, since wr/zr already absorb it (see to_wr/to_zr above,
+// which reciprocate GA*w+GB and GC*z+GD, not w and z directly).
+cx F_corner(cx wr, cx zr) {
+	cx r=ipow(zr,g_dz);
+	for(int i=0;i<g_F.n;++i) r+=fi_corner(i,zr)*ipow(wr,g_F.n-i);
+	return r;
+}
+cx Fwr_corner(cx wr, cx zr) { // dK/dwr
+	cx r(0,0);
+	for(int i=0;i<g_F.n;++i) {
+		int e=g_F.n-i;
+		if(e>=1) r+=fi_corner(i,zr)*double(e)*ipow(wr,e-1);
+	}
+	return r;
+}
+cx Fzr_corner(cx wr, cx zr) { // dK/dzr
+	cx r(0,0);
+	if(g_dz>=1) r=double(g_dz)*ipow(zr,g_dz-1);
+	for(int i=0;i<g_F.n;++i) r+=fi_corner_dz(i,zr)*ipow(wr,g_F.n-i);
+	return r;
+}
+
+// Corner-chart analogue of branch_gap(): smallest pairwise gap between
+// the n roots of K(.,zr) in wr, via the same resultant technique (K's
+// coefficients as a polynomial in wr, highest degree first, are exactly
+// fi_corner(0..n-1,zr) then the zr^dz constant term; its wr-derivative's
+// likewise from differentiating each wr^(n-i) term). Needed because
+// branch_gap(z) itself is a *raw w-space* gap, which genuinely diverges
+// as z->infty for a curve like w^2=z^3-z (the two roots are ~+-z^1.5
+// apart) -- using it unchanged this close to the corner would keep
+// cell_priority() artificially tiny there (huge mingap) and starve
+// refinement right where the corner chart above needs it most, even
+// though the wr-sphere diameter is already bounded.
+double branch_gap_corner(cx zr) {
+	if(g_F.n<2) return 1e18;
+	vector<cx> p(g_F.n+1), q(g_F.n);
+	for(int i=0;i<g_F.n;++i) p[i]=fi_corner(i,zr);
+	p[g_F.n]=ipow(zr,g_dz);
+	for(int i=0;i<g_F.n;++i) q[i]=fi_corner(i,zr)*double(g_F.n-i);
+	cx res=resultant(p,g_F.n,q,g_F.n-1);
+	double mag=std::abs(res);
+	return std::pow(mag,1.0/(g_F.n*(g_F.n-1)));
+}
 
 void compute_vertex_data(T& t, Vertex(T) v) {
 	cx w=from_sphere(w_sphere(t,v));
@@ -274,6 +389,13 @@ void compute_vertex_data(T& t, Vertex(T) v) {
 	// point); cell_priority() below combines this with the cell's own
 	// w-extent, since "close to branch point" alone doesn't say the
 	// cell's triangles are actually at risk of holding >1 sheet.
+	// Near the corner (z far), use the corner-chart gap instead of the
+	// raw one -- see branch_gap_corner's comment.
+	if(sphere_is_far(z_sphere(t,v))) {
+		cx zr=to_zr(recip_from_sphere(z_sphere(t,v)));
+		attr(t,v)->tval=branch_gap_corner(zr);
+		return;
+	}
 	attr(t,v)->tval=branch_gap(z);
 }
 
@@ -325,28 +447,31 @@ struct refine_app : do_nothing {
 	}
 };
 
+double sphere_dist(const vec<3,double>& a, const vec<3,double>& b) {
+	double s=0;
+	for(int i=0;i<3;++i) { double d=a[i]-b[i]; s+=d*d; }
+	return sqrt(s);
+}
+
 // t_sigma = (cell's own diameter in w) / (smallest cached branch-gap
 // among its vertices). Large means "this cell is wide relative to how
 // close the sheets get here" -- the actual risk factor for a triangle
 // inside it seeing more than one root -- rather than just "some vertex
 // is near a branch point" (which says nothing about the cell's size).
+// Diameter is measured on the w-sphere (chordal distance, bounded in
+// [0,2]), not in the from_sphere() chart -- unlike a chart diameter, this
+// stays meaningful right up to a pole, so cells near one no longer need
+// to be excluded here (see sphere_is_far/the corner chart above for how
+// extraction itself handles them).
 double cell_priority(const T& t, Cell(T) cv) {
 	array<Vertex(T),DIM+1> vs;
 	vertices(t,cv,vs);
-	cx w[DIM+1];
 	double mingap=tval(t,vs[0]);
-	for(int i=0;i<=DIM;++i) {
-		w[i]=from_sphere(w_sphere(t,vs[i]));
-		// A cell touching the pole proxy has an unbounded/meaningless
-		// w-diameter; refining it further wastes effort and cannot help
-		// (see near_pole), so it gets no priority from this criterion.
-		if(near_pole(w[i])) return 0;
-		if(tval(t,vs[i])<mingap) mingap=tval(t,vs[i]);
-	}
+	for(int i=0;i<=DIM;++i) if(tval(t,vs[i])<mingap) mingap=tval(t,vs[i]);
 	double wdiam=0;
 	for(int i=0;i<=DIM;++i)
 		for(int j=i+1;j<=DIM;++j) {
-			double d=std::abs(w[i]-w[j]);
+			double d=sphere_dist(w_sphere(t,vs[i]),w_sphere(t,vs[j]));
 			if(d>wdiam) wdiam=d;
 		}
 	return wdiam/(mingap+1e-12);
@@ -408,19 +533,26 @@ bary_to_xy(const tri_frame& fr, double l1, double l2, double& x, double& y) {
 	x=l[fr.ip]*fr.xp+l[fr.iq];
 }
 
-// Newton's method for F(w(x,y),z(x,y))=0 in the triangle's local
-// orthogonal frame (see tri_frame above), from a given seed. Converts
-// back to barycentric coordinates (w.r.t. the original vertex order) at
-// the end, so callers and the domain/boundary check are unaffected by
-// the frame used internally.
+typedef cx (*cxfun2)(cx,cx);
+
+// Newton's method for Ffun(w(x,y),z(x,y))=0 in the triangle's local
+// orthogonal frame (see tri_frame above), from a given seed. Ffun/Fwfun/
+// Fzfun default to the ordinary F/Fw/Fz, but triangle_intersection passes
+// F_corner/Fwr_corner/Fzr_corner (and correspondingly (w,z)-shaped but
+// actually-(wr,zr)-valued frame data) for a triangle at the (w,z) ->
+// (infty,infty) corner -- Newton itself doesn't need to know which chart
+// it's iterating in. Converts back to barycentric coordinates (w.r.t.
+// the original vertex order) at the end, so callers and the domain/
+// boundary check are unaffected by the frame or chart used internally.
 bool
-newton_on_triangle(const tri_frame& fr, double x, double y, double& out_l1, double& out_l2) {
+newton_on_triangle(const tri_frame& fr, double x, double y, double& out_l1, double& out_l2,
+										cxfun2 Ffun=F, cxfun2 Fwfun=Fw, cxfun2 Fzfun=Fz) {
 	for(int iter=0; iter<20; ++iter) {
 		cx w=fr.Pow+x*fr.Xw+y*fr.Yw;
 		cx z=fr.Poz+x*fr.Xz+y*fr.Yz;
-		cx Fv=F(w,z);
+		cx Fv=Ffun(w,z);
 		if(std::norm(Fv)<1e-24) break;
-		cx fw=Fw(w,z), fz=Fz(w,z);
+		cx fw=Fwfun(w,z), fz=Fzfun(w,z);
 		cx cX=fw*fr.Xw+fz*fr.Xz;
 		cx cY=fw*fr.Yw+fz*fr.Yz;
 		double j00=cX.real(), j01=cY.real(), j10=cX.imag(), j11=cY.imag();
@@ -433,7 +565,7 @@ newton_on_triangle(const tri_frame& fr, double x, double y, double& out_l1, doub
 	}
 	cx w=fr.Pow+x*fr.Xw+y*fr.Yw;
 	cx z=fr.Poz+x*fr.Xz+y*fr.Yz;
-	if(std::norm(F(w,z))>1e-20) return false;
+	if(std::norm(Ffun(w,z))>1e-20) return false;
 
 	double l[3];
 	l[fr.io]=y;
@@ -470,19 +602,41 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 
 	array<Vertex(T),3> vs;
 	vertices(t,tri,vs);
-	cx w0=from_sphere(w_sphere(t,vs[0]));
-	cx w1=from_sphere(w_sphere(t,vs[1]));
-	cx w2=from_sphere(w_sphere(t,vs[2]));
-	cx z0=from_sphere(z_sphere(t,vs[0]));
-	cx z1=from_sphere(z_sphere(t,vs[1]));
-	cx z2=from_sphere(z_sphere(t,vs[2]));
 
-	if(near_pole(w0)||near_pole(w1)||near_pole(w2)||
-		 near_pole(z0)||near_pole(z1)||near_pole(z2)) return;
+	// Which chart this triangle needs: w far but z finite (or vice versa)
+	// is a region the surface never visits for a curve monic in w (see
+	// the corner-chart comment above), so it stays excluded exactly as
+	// before. Only the joint corner (both far) gets the new treatment.
+	bool w_far=false, z_far=false;
+	for(int k=0;k<3;++k) {
+		if(sphere_is_far(w_sphere(t,vs[k]))) w_far=true;
+		if(sphere_is_far(z_sphere(t,vs[k]))) z_far=true;
+	}
+	if(w_far!=z_far) return;
+
+	cx w0,w1,w2,z0,z1,z2; // either the ordinary (w,z) chart, or (wr,zr)
+	cxfun2 Ffun,Fwfun,Fzfun;
+	if(w_far) {
+		w0=to_wr(recip_from_sphere(w_sphere(t,vs[0])));
+		w1=to_wr(recip_from_sphere(w_sphere(t,vs[1])));
+		w2=to_wr(recip_from_sphere(w_sphere(t,vs[2])));
+		z0=to_zr(recip_from_sphere(z_sphere(t,vs[0])));
+		z1=to_zr(recip_from_sphere(z_sphere(t,vs[1])));
+		z2=to_zr(recip_from_sphere(z_sphere(t,vs[2])));
+		Ffun=F_corner; Fwfun=Fwr_corner; Fzfun=Fzr_corner;
+	} else {
+		w0=from_sphere(w_sphere(t,vs[0]));
+		w1=from_sphere(w_sphere(t,vs[1]));
+		w2=from_sphere(w_sphere(t,vs[2]));
+		z0=from_sphere(z_sphere(t,vs[0]));
+		z1=from_sphere(z_sphere(t,vs[1]));
+		z2=from_sphere(z_sphere(t,vs[2]));
+		Ffun=F; Fwfun=Fw; Fzfun=Fz;
+	}
 
 	double seeds[8][2]; int nseeds=0;
 	{
-		cx F0=F(w0,z0), F1=F(w1,z1), F2=F(w2,z2);
+		cx F0=Ffun(w0,z0), F1=Ffun(w1,z1), F2=Ffun(w2,z2);
 		cx a1=F1-F0, a2=F2-F0;
 		double m00=a1.real(), m01=a2.real(), m10=a1.imag(), m11=a2.imag();
 		double det=m00*m11-m01*m10;
@@ -503,7 +657,7 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 	for(int s=0; s<nseeds && d->nroots<2; ++s) {
 		double sx,sy; bary_to_xy(fr,seeds[s][0],seeds[s][1],sx,sy);
 		double ol1,ol2;
-		if(!newton_on_triangle(fr,sx,sy,ol1,ol2)) continue;
+		if(!newton_on_triangle(fr,sx,sy,ol1,ol2,Ffun,Fwfun,Fzfun)) continue;
 		bool dup=false;
 		for(int r=0;r<d->nroots;++r)
 			if(fabs(d->l1[r]-ol1)<1e-7 && fabs(d->l2[r]-ol2)<1e-7) dup=true;
@@ -511,8 +665,19 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 		double ol0=1.0-ol1-ol2;
 		int r=d->nroots;
 		d->l1[r]=ol1; d->l2[r]=ol2;
-		d->w_pt[r]=ol0*w0+ol1*w1+ol2*w2;
-		d->z_pt[r]=ol0*z0+ol1*z1+ol2*z2;
+		if(w_far) {
+			// The root was found in (wr,zr); convert back to an ordinary
+			// (possibly huge but finite) (w,z) point for downstream code
+			// (crossing-node identity itself only ever uses l1,l2, which
+			// are already chart-independent).
+			cx wr_pt=ol0*w0+ol1*w1+ol2*w2;
+			cx zr_pt=ol0*z0+ol1*z1+ol2*z2;
+			d->w_pt[r]=from_wr(wr_pt);
+			d->z_pt[r]=from_zr(zr_pt);
+		} else {
+			d->w_pt[r]=ol0*w0+ol1*w1+ol2*w2;
+			d->z_pt[r]=ol0*z0+ol1*z1+ol2*z2;
+		}
 		++d->nroots;
 	}
 }
@@ -707,6 +872,11 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	g_F=catalog[function_index].F;
+	g_dz=0;
+	for(int i=0;i<g_F.n;++i) {
+		int deg=(int)g_F.c[i].size()-1;
+		if(deg>g_dz) g_dz=deg;
+	}
 	cout<<"function: "<<function_index<<" ("<<catalog[function_index].name<<") -- "
 			<<catalog[function_index].description<<endl;
 	cout<<"coordinates: "<<(g_generic_coords?"generic (rotated+translated)":"aligned (original)")<<endl;
@@ -918,6 +1088,64 @@ int main(int argc, char* argv[]) {
 		cout<<"final cell level histogram:";
 		for(int l=0;l<32;++l) if(hist[l]) cout<<" ["<<l<<"]="<<hist[l];
 		cout<<endl;
+	}
+
+	// Triangle-shape diagnostic: minimum angle of every current 2-simplex,
+	// computed in the ambient R^3 x R^3 = R^6 embedding given by
+	// (w_sphere,z_sphere) -- the same space slerp bisection actually
+	// operates in (unlike the (w,z) chart, which blows up near the pole
+	// proxy). Any 3 points span an affine subspace of dimension <=2, so
+	// each triangle is exactly flat there and its angles genuinely sum to
+	// 180 deg (min angle <=60 deg). This is an empirical check of the
+	// claim (made when conditioning the per-triangle Newton solve) that
+	// Maubach bisection keeps simplex shapes within a bounded family
+	// rather than degenerating -- not assumed here, measured.
+	{
+		const double PI=3.14159265358979323846;
+		double min_angle=180.0, max_min_angle=0.0, sum_angle=0.0;
+		int ntri=0, nsliver5=0, nsliver1=0;
+		int hist[18]={0}; // 5-degree buckets, [0,90)
+		Simplex_it(T,2) i,end;
+		for(simplices(t,i,end); i!=end; ++i) {
+			if(!is_current(t,*i)) continue;
+			array<Vertex(T),3> vs;
+			vertices(t,*i,vs);
+			double P[3][6];
+			for(int k=0;k<3;++k) {
+				vec<3,double> ws=w_sphere(t,vs[k]), zs=z_sphere(t,vs[k]);
+				for(int c=0;c<3;++c) { P[k][c]=ws[c]; P[k][3+c]=zs[c]; }
+			}
+			double ang[3];
+			for(int k=0;k<3;++k) {
+				int a=k, b=(k+1)%3, c=(k+2)%3;
+				double u[6],v[6],un=0,vn=0,dot=0;
+				for(int d=0;d<6;++d) { u[d]=P[b][d]-P[a][d]; v[d]=P[c][d]-P[a][d]; }
+				for(int d=0;d<6;++d) { un+=u[d]*u[d]; vn+=v[d]*v[d]; dot+=u[d]*v[d]; }
+				un=sqrt(un); vn=sqrt(vn);
+				double cosang=dot/(un*vn);
+				if(cosang>1) cosang=1; if(cosang<-1) cosang=-1;
+				ang[k]=acos(cosang)*180.0/PI;
+			}
+			double mn=ang[0]; if(ang[1]<mn) mn=ang[1]; if(ang[2]<mn) mn=ang[2];
+			if(mn<min_angle) min_angle=mn;
+			if(mn>max_min_angle) max_min_angle=mn;
+			sum_angle+=mn;
+			++ntri;
+			if(mn<5.0) ++nsliver5;
+			if(mn<1.0) ++nsliver1;
+			int bucket=(int)(mn/5.0); if(bucket>17) bucket=17; if(bucket<0) bucket=0;
+			++hist[bucket];
+		}
+		cout<<endl<<"--- triangle min-angle statistics (w_sphere/z_sphere ambient R^6) ---"<<endl;
+		cout<<"triangles: "<<ntri<<endl;
+		cout<<"min-angle over all triangles: min="<<min_angle<<" deg, "
+				<<"max="<<max_min_angle<<" deg, mean="<<(sum_angle/ntri)<<" deg"<<endl;
+		cout<<"slivers: min-angle<5deg: "<<nsliver5<<" ("<<(100.0*nsliver5/ntri)<<"%) "
+				<<"min-angle<1deg: "<<nsliver1<<" ("<<(100.0*nsliver1/ntri)<<"%)"<<endl;
+		cout<<"histogram (5-degree buckets of the per-triangle min angle):"<<endl;
+		for(int b=0;b<18;++b) if(hist[b])
+			cout<<"  ["<<(b*5)<<","<<(b*5+5)<<"): "<<hist[b]
+					<<" ("<<(100.0*hist[b]/ntri)<<"%)"<<endl;
 	}
 
 	// --- Phase 3: surface extraction ---------------------------------

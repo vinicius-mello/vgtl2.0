@@ -150,6 +150,14 @@ arbitrary real 2-plane in `C^2` is holomorphic in `x+iy` only when that
 plane happens to be a complex line, which is not the generic case for
 a mesh triangle.)
 
+For a triangle with a vertex far enough in `w` or `z` to be near a pole,
+`Ffun`/`Fwfun`/`Fzfun` (passed into `newton_on_triangle`) switch from
+`F`/`Fw`/`Fz` to the corner-chart polynomial `F_corner`/`Fwr_corner`/
+`Fzr_corner` and the triangle's vertices are expressed in `(wr,zr)`
+instead of `(w,z)` -- Newton itself is unchanged, it just iterates in
+whichever chart it's given. See *Known limitations* below for what this
+chart is and its (real, curve-dependent) limits.
+
 Each crossing point is given a **canonical identity**
 (`compute_crossing_node`) based on *where* it sits on the ambient
 4-simplex, not on which triangle happened to find it: a mesh vertex,
@@ -225,11 +233,39 @@ from adjacent 4-simplices -- see *Known limitations*).
   so far) and concentrates one level below the cap, consistent with a
   sampling limit rather than a structural one -- not yet fully
   isolated.
-- **Pole handling is a placeholder.** `w=∞` or `z=∞` are approximated
-  by a large finite value (`1e8`) rather than treated projectively;
-  cells/triangles that touch this proxy are excluded from refinement
-  and extraction (`near_pole`). Fine as long as the curve of interest
-  doesn't pass near a pole; not correct in general.
+- **Pole handling is projective only at the joint corner.** `F` is monic
+  in `w`, so `w=∞` is never a root for finite `z` (the `w`-homogenized
+  polynomial is `1` at `w'=0`) -- every catalog curve so far only ever
+  needs a second chart at the *joint* `(w,z)->(∞,∞)` corner, which is now
+  handled properly: `triangle_intersection` switches a triangle to the
+  doubly-homogenized polynomial `K(wr,zr) = wr^n zr^dz F_raw(1/wr,1/zr)`
+  (`wr=1/(GA w+GB)`, `zr=1/(GC z+GD)`, finite at `(wr,zr)=(0,0)`) once any
+  vertex crosses `sphere_is_far` (an ordinary-chart `|w|` or `|z|` past
+  `1e6`, checked via the vertex's sphere coordinates so it costs nothing
+  extra for ordinary vertices); `cell_priority`'s diameter is measured on
+  the sphere (bounded everywhere, unlike a chart diameter) and
+  `branch_gap_corner` mirrors `branch_gap` in the `(wr,zr)` chart, so
+  refinement is no longer starved right at the corner by a raw `w`-gap
+  that diverges there. A vertex far in only *one* of `w`/`z` (the other
+  finite) stays excluded, since a monic-in-`w` curve never visits that
+  region.
+
+  This closes the hole completely for a curve whose point at infinity is
+  a *regular* point of `K=0` there (verified on `parabola`: `K(wr,zr) =
+  zr-wr^2`, `∂K/∂zr=1≠0` at the origin -- the residual gap shrinks with
+  depth exactly like anywhere else, confirmed empirically going from
+  `--depth 12` to `--depth 15`). It does *not* fully close the hole for
+  `elliptic`: there, `K(wr,zr) = zr^3+(zr^2-1)wr^2`, and `K`, `∂K/∂wr`,
+  `∂K/∂zr` all vanish at `(wr,zr)=(0,0)` -- a genuine cusp (`wr^2≈zr^3`
+  near the origin), because `w` grows like `z^1.5` along this curve, a
+  power incompatible with the `C_∞ x C_∞ = P^1 x P^1` grid. This is a
+  structural fact about this curve in *this* ambient compactification
+  (its standard smooth model lives in `P^2` instead, where infinity is a
+  single regular point), not a bug -- more depth shrinks the residual gap
+  somewhat but a cusp's degenerate tangent keeps it from vanishing the
+  way it does at a regular point. Resolving that fully would need a
+  curve-specific local (Puiseux) reparametrization at the singular point,
+  well beyond the general per-triangle treatment here.
 - **Memory grows monotonically with depth.** `nmt`'s cell containers
   are append-only -- Maubach subdivision marks parent cells
   not-current rather than freeing them -- so deep runs can exhaust
