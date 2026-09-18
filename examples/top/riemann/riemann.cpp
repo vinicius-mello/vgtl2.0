@@ -7,6 +7,7 @@
 #include <map>
 #include <complex>
 #include <cmath>
+#include <random>
 #include <vgtl/top/model/nmt.hpp>
 #include <vgtl/utl/array_cons.hpp>
 #include <vgtl/top/add_simplex.hpp>
@@ -238,6 +239,22 @@ struct sphere_rot {
 	vec<3,double> apply(const vec<3,double>& p) const { return rotate3(p,axis,c,s); }
 };
 sphere_rot g_rot_w, g_rot_z; // set from main() when --generic is passed
+
+// Random SO(3) rotation (uniform axis via 3 Gaussians, uniform angle),
+// replacing the earlier fixed/hardcoded g_rot_w.set(0.3,0.5,0.8,0.9)
+// etc. -- same purpose (some rotation that isn't axis-aligned and
+// differs between w and z), but now seed-controlled via --generic-seed
+// so the "does this actually fix it, or was it luck of one particular
+// rotation" question (raised for the analogous CP^2 --generic in
+// examples/top/riemann_PC2/) can be asked here too.
+unsigned g_generic_seed=12345;
+sphere_rot random_sphere_rot(std::mt19937& rng) {
+	std::normal_distribution<double> nd(0.0,1.0);
+	std::uniform_real_distribution<double> ud(0.0,2.0*std::acos(-1.0));
+	sphere_rot r;
+	r.set(nd(rng),nd(rng),nd(rng),ud(rng));
+	return r;
+}
 
 cx F(cx w, cx z)  { return F_raw(GA*w+GB, GC*z+GD); }
 cx Fw(cx w, cx z) { return GA*Fw_raw(GA*w+GB, GC*z+GD); }
@@ -495,7 +512,7 @@ struct refine_app : do_nothing {
 	vector<Cell(T)> new_cells;
 
 	Vertex(T) add_edge_vertex(T& t, Edge(T) e) {
-		array<Vertex(T),2> vs;
+		vgtl::array<Vertex(T),2> vs;
 		vertices(t,e,vs);
 		Vertex(T) v=add(t);
 		w_sphere_set(t,v,slerp_midpoint(w_sphere(t,vs[0]),w_sphere(t,vs[1])));
@@ -544,7 +561,7 @@ double sphere_dist(const vec<3,double>& a, const vec<3,double>& b) {
 // every vertex lands on one side removes the mixed-chart cell itself;
 // only a stopgap until chart selection is made cell-consistent instead
 // of per-triangle (see cell_priority's caller for the TODO).
-bool straddles_far(const T& t, const array<Vertex(T),DIM+1>& vs) {
+bool straddles_far(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
 	bool wf=false, wn=false, zf=false, zn=false;
 	for(int i=0;i<=DIM;++i) {
 		if(sphere_is_far(w_sphere(t,vs[i]))) wf=true; else wn=true;
@@ -554,7 +571,7 @@ bool straddles_far(const T& t, const array<Vertex(T),DIM+1>& vs) {
 }
 
 double cell_priority(const T& t, Cell(T) cv) {
-	array<Vertex(T),DIM+1> vs;
+	vgtl::array<Vertex(T),DIM+1> vs;
 	vertices(t,cv,vs);
 	if(straddles_far(t,vs)) return 1e18;
 	double mingap=tval(t,vs[0]);
@@ -691,7 +708,7 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 	if(d->computed) return;
 	d->computed=true;
 
-	array<Vertex(T),3> vs;
+	vgtl::array<Vertex(T),3> vs;
 	vertices(t,tri,vs);
 
 	// Which chart this triangle needs. F is monic in w, so at the exact
@@ -829,7 +846,7 @@ compute_crossing_node(const T& t, Simplex(T,2) tri, int r, crossing_node& nd) {
 	nd.sub=r; nd.param=0;
 	if(zeros>=2) {
 		int keep=(zeros==3) ? 0 : (3-zi[0]-zi[1]);
-		array<Vertex(T),3> vs; vertices(t,tri,vs);
+		vgtl::array<Vertex(T),3> vs; vertices(t,tri,vs);
 		nd.dim=0; nd.desc=vs[keep].desc;
 	} else if(zeros==1) {
 		int lo=(zi[0]==0)?1:0, hi=(zi[0]==2)?1:2;
@@ -995,14 +1012,8 @@ int main(int argc, char* argv[]) {
 		string arg=argv[i];
 		if(arg=="--generic") {
 			g_generic_coords=true;
-			GA=std::polar(1.0,0.7); GB=cx(0.13,0.29);
-			GC=std::polar(1.0,1.1); GD=cx(-0.21,0.17);
-			// Independent, fixed, arbitrary axes/angles for the w- and
-			// z-factor octahedra -- just needs to not be axis-aligned
-			// and to differ between w and z (else the product mesh keeps
-			// its own w<->z symmetry). See g_rot_w/g_rot_z above.
-			g_rot_w.set(0.3,0.5,0.8, 0.9);
-			g_rot_z.set(0.7,-0.2,0.4, 1.3);
+		} else if(arg=="--generic-seed" && i+1<argc) {
+			g_generic_coords=true; g_generic_seed=(unsigned)atoi(argv[++i]);
 		} else if(arg=="--depth" && i+1<argc) {
 			max_depth=atoi(argv[++i]);
 		} else if(arg=="--threshold" && i+1<argc) {
@@ -1021,10 +1032,26 @@ int main(int argc, char* argv[]) {
 			return 0;
 		} else {
 			cerr<<"unrecognized argument: "<<arg<<endl;
-			cerr<<"usage: "<<argv[0]<<" [--function N] [--generic] [--depth N] "
+			cerr<<"usage: "<<argv[0]<<" [--function N] [--generic] [--generic-seed N] [--depth N] "
 					<<"[--threshold X] [--onion] [--onion-scale X] [--cutoff X] [--list-functions]"<<endl;
 			return 1;
 		}
+	}
+
+	if(g_generic_coords) {
+		// Affine transform on F itself: fixed, unrelated to the seed
+		// (moves finite landmark points around; see the comment above
+		// GA/GB/GC/GD -- an affine map always fixes infinity, which is
+		// why the seed-vertex rotation below exists as a separate fix).
+		GA=std::polar(1.0,0.7); GB=cx(0.13,0.29);
+		GC=std::polar(1.0,1.1); GD=cx(-0.21,0.17);
+		// Random, seed-controlled rotation of the seed octahedron itself
+		// (independent draws for w and z -- two draws from the same
+		// stream, so they generically differ, unlike a shared rotation
+		// which would keep the product mesh's own w<->z symmetry).
+		std::mt19937 rng(g_generic_seed);
+		g_rot_w=random_sphere_rot(rng);
+		g_rot_z=random_sphere_rot(rng);
 	}
 
 	vector<catalog_entry>& catalog=function_catalog();
@@ -1041,7 +1068,9 @@ int main(int argc, char* argv[]) {
 	}
 	cout<<"function: "<<function_index<<" ("<<catalog[function_index].name<<") -- "
 			<<catalog[function_index].description<<endl;
-	cout<<"coordinates: "<<(g_generic_coords?"generic (rotated+translated)":"aligned (original)")<<endl;
+	cout<<"coordinates: "<<(g_generic_coords?"generic (rotated+translated)":"aligned (original)");
+	if(g_generic_coords) cout<<" (seed="<<g_generic_seed<<")";
+	cout<<endl;
 	cout<<"max_depth="<<max_depth<<" threshold="<<threshold<<endl;
 	cout<<"projection: "<<(g_onion?"onion":"flat");
 	if(g_onion) cout<<" (scale="<<g_onion_scale<<")";
@@ -1079,7 +1108,7 @@ int main(int argc, char* argv[]) {
 				const octa_tri& sz=octahedron[b]; // z-factor triangle
 				for(int p=0; p<6; ++p) {
 					const path6& pa=paths[p];
-					array<Vertex(T),5> vs;
+					vgtl::array<Vertex(T),5> vs;
 					for(int k=0; k<5; ++k) {
 						int wl=sw.v[pa.i[k]];
 						int zl=sz.v[pa.j[k]];
@@ -1272,7 +1301,7 @@ int main(int argc, char* argv[]) {
 		Simplex_it(T,2) i,end;
 		for(simplices(t,i,end); i!=end; ++i) {
 			if(!is_current(t,*i)) continue;
-			array<Vertex(T),3> vs;
+			vgtl::array<Vertex(T),3> vs;
 			vertices(t,*i,vs);
 			double P[3][6];
 			for(int k=0;k<3;++k) {
