@@ -161,6 +161,7 @@ int count_incoherent(const T& t) {
 // new test curves can be added there without touching this file. g_F
 // is set from function_catalog()[index] in main(), based on --function.
 poly_F g_F;
+double g_imz_min=1e300, g_imz_max=-1e300;
 
 cx F_raw(cx w, cx z) {
 	cx r(1,0);
@@ -186,8 +187,57 @@ cx Fz_raw(cx w, cx z) {
 // with the octahedral seed mesh's (real coefficients, seed vertices on
 // the real/imaginary axes); turning this on breaks that alignment
 // without changing the curve being triangulated, to compare the two.
+//
+// This only ever moves the *finite* landmark vertices (0,1,-1,i,-i),
+// though: an affine map always fixes infinity, so the seed's w=infty
+// and z=infty vertices can never be displaced this way. For a curve
+// whose z=infty is a genuine branch point (e.g. any degree-2 F -- by
+// Riemann-Hurwitz a degree-n cover of P^1 needs branch points summing
+// to a fixed count, so a curve like w^2=z with only one *finite*
+// branch point is forced to have a second one at infinity), that seed
+// vertex sits exactly on it forever, at every refinement depth (Maubach
+// bisection never touches an original seed vertex) -- confirmed
+// directly: branch_gap_corner(zr)->0 as zr->0, and the affected cells'
+// failure rate stays flat (~38-40%) at every depth tried, instead of
+// shrinking like the ordinary alignment-sensitivity case does. See
+// g_generic_rot below for the fix.
 bool g_generic_coords=false;
 cx GA(1,0), GB(0,0), GC(1,0), GD(0,0);
+
+// Sphere rotation applied to the *seed octahedron's* vertex placement
+// (not to F) under --generic, independently for the w- and z-factor --
+// a rotation is itself a (unitary) Mobius transform of C_infty, and
+// unlike the affine one above it does NOT fix infinity: the vertex
+// that used to sit at the literal pole now sits at some ordinary
+// finite point, generic relative to the curve, so it no longer pins a
+// permanently-coarse corner there. Everything downstream (from_sphere,
+// the corner chart, sphere_is_far, spherical-midpoint bisection) reads
+// off actual sphere coordinates and needs no awareness of this --
+// only the initial vertex construction does. F itself is deliberately
+// left untouched here (composing F_raw with a true Mobius map, rather
+// than just moving mesh vertices, would introduce a *new* pole of F at
+// some other finite mesh point -- see the discussion that led here).
+vec<3,double> rotate3(const vec<3,double>& p, const vec<3,double>& axis, double c, double s) {
+	double dot=p[0]*axis[0]+p[1]*axis[1]+p[2]*axis[2];
+	vec<3,double> cr;
+	cr[0]=axis[1]*p[2]-axis[2]*p[1];
+	cr[1]=axis[2]*p[0]-axis[0]*p[2];
+	cr[2]=axis[0]*p[1]-axis[1]*p[0];
+	vec<3,double> r;
+	for(int i=0;i<3;++i) r[i]=p[i]*c+cr[i]*s+axis[i]*dot*(1-c);
+	return r;
+}
+struct sphere_rot {
+	vec<3,double> axis; double c,s;
+	sphere_rot() { axis[0]=0; axis[1]=0; axis[2]=1; c=1; s=0; }
+	void set(double ax,double ay,double az,double angle) {
+		double n=sqrt(ax*ax+ay*ay+az*az);
+		axis[0]=ax/n; axis[1]=ay/n; axis[2]=az/n;
+		c=cos(angle); s=sin(angle);
+	}
+	vec<3,double> apply(const vec<3,double>& p) const { return rotate3(p,axis,c,s); }
+};
+sphere_rot g_rot_w, g_rot_z; // set from main() when --generic is passed
 
 cx F(cx w, cx z)  { return F_raw(GA*w+GB, GC*z+GD); }
 cx Fw(cx w, cx z) { return GA*Fw_raw(GA*w+GB, GC*z+GD); }
@@ -283,13 +333,27 @@ cx recip_from_sphere(const vec<3,double>& p) {
 // finite) (w,z) point for downstream code.
 cx to_wr(cx wprime) { return wprime/(GA+GB*wprime); }
 cx to_zr(cx zprime) { return zprime/(GC+GD*zprime); }
+// Clamped to the same practical-infinity scale as the placeholder above:
+// once the single-far-only band is allowed through (see
+// triangle_intersection), a root can land at a wr/zr that's small but
+// not below the placeholder cutoff, recovering a w/z far past 1e8 that
+// downstream code (in particular the plain-F residual check) never
+// expected. Rescaling (not truncating) keeps the direction, only bounds
+// the magnitude to what the rest of the code already treats as "at the
+// pole" in practice.
 cx from_wr(cx wr) {
 	if(std::norm(wr)<1e-24) return cx(1e8,0);
-	return (cx(1,0)/wr-GB)/GA;
+	cx v=(cx(1,0)/wr-GB)/GA;
+	double m=std::abs(v);
+	if(m>1e8) v*=1e8/m;
+	return v;
 }
 cx from_zr(cx zr) {
 	if(std::norm(zr)<1e-24) return cx(1e8,0);
-	return (cx(1,0)/zr-GD)/GC;
+	cx v=(cx(1,0)/zr-GD)/GC;
+	double m=std::abs(v);
+	if(m>1e8) v*=1e8/m;
+	return v;
 }
 
 // A vertex is "far" (near the north-pole proxy) when the ordinary chart
@@ -463,9 +527,36 @@ double sphere_dist(const vec<3,double>& a, const vec<3,double>& b) {
 // stays meaningful right up to a pole, so cells near one no longer need
 // to be excluded here (see sphere_is_far/the corner chart above for how
 // extraction itself handles them).
+// A cell whose 5 vertices straddle the sphere_is_far cutoff (some past
+// it, some not, in either w or z) gets top priority regardless of
+// branch_gap: triangle_intersection picks its chart per-triangle from
+// that same cutoff, so a straddling cell has some facets in the
+// ordinary chart and others in the corner chart K(wr,zr) -- which,
+// being the doubly-homogenized polynomial, can carry spurious
+// components/roots along wr=0 or zr=0 that aren't part of the actual
+// affine curve. Mixing those with genuine ordinary-chart crossings
+// inside one cell breaks the per-tetrahedron crossing count even far
+// from any branch point (empirically: this is where nearly all
+// "bad" cells landed once the single-far band was let through, see
+// the corner-chart fix above, and the count grew rather than shrank
+// with depth -- not a sampling limit, so branch_gap-based priority
+// alone never drives refinement here). Forcing it to subdivide until
+// every vertex lands on one side removes the mixed-chart cell itself;
+// only a stopgap until chart selection is made cell-consistent instead
+// of per-triangle (see cell_priority's caller for the TODO).
+bool straddles_far(const T& t, const array<Vertex(T),DIM+1>& vs) {
+	bool wf=false, wn=false, zf=false, zn=false;
+	for(int i=0;i<=DIM;++i) {
+		if(sphere_is_far(w_sphere(t,vs[i]))) wf=true; else wn=true;
+		if(sphere_is_far(z_sphere(t,vs[i]))) zf=true; else zn=true;
+	}
+	return (wf&&wn)||(zf&&zn);
+}
+
 double cell_priority(const T& t, Cell(T) cv) {
 	array<Vertex(T),DIM+1> vs;
 	vertices(t,cv,vs);
+	if(straddles_far(t,vs)) return 1e18;
 	double mingap=tval(t,vs[0]);
 	for(int i=0;i<=DIM;++i) if(tval(t,vs[i])<mingap) mingap=tval(t,vs[i]);
 	double wdiam=0;
@@ -603,20 +694,33 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 	array<Vertex(T),3> vs;
 	vertices(t,tri,vs);
 
-	// Which chart this triangle needs: w far but z finite (or vice versa)
-	// is a region the surface never visits for a curve monic in w (see
-	// the corner-chart comment above), so it stays excluded exactly as
-	// before. Only the joint corner (both far) gets the new treatment.
+	// Which chart this triangle needs. F is monic in w, so at the exact
+	// point z=infty every root w is also infinite -- but w and z don't
+	// reach the *same* fixed FAR_W_CUTOFF at the same point along the
+	// curve unless w grows linearly in z: e.g. on the parabola
+	// w^2=z, |w|~sqrt(|z|), so z crosses the cutoff while w is still
+	// only ~sqrt(FAR_W_CUTOFF) -- a real, curve-traversed band near the
+	// corner where exactly one of the two is "far". The old code treated
+	// w_far!=z_far as the (literally-at-infinity-only) region "w far,
+	// z finite" the surface never visits, and excluded it outright --
+	// silently dropping that entire band (confirmed: the excluded-triangle
+	// count *grows* with refinement depth instead of shrinking, since
+	// finer triangles sample more of the band). Fix: use the corner chart
+	// whenever *either* is far, not only when both are. This costs
+	// nothing extra for a truly-empty triangle (Newton just finds no
+	// root there, same outcome as the old exclusion) and is exact where
+	// the curve actually passes through this band, since K(wr,zr) is a
+	// valid chart (1/w, 1/z are finite and well-conditioned) whether or
+	// not the *other* coordinate happens to be large too.
 	bool w_far=false, z_far=false;
 	for(int k=0;k<3;++k) {
 		if(sphere_is_far(w_sphere(t,vs[k]))) w_far=true;
 		if(sphere_is_far(z_sphere(t,vs[k]))) z_far=true;
 	}
-	if(w_far!=z_far) return;
 
 	cx w0,w1,w2,z0,z1,z2; // either the ordinary (w,z) chart, or (wr,zr)
 	cxfun2 Ffun,Fwfun,Fzfun;
-	if(w_far) {
+	if(w_far||z_far) {
 		w0=to_wr(recip_from_sphere(w_sphere(t,vs[0])));
 		w1=to_wr(recip_from_sphere(w_sphere(t,vs[1])));
 		w2=to_wr(recip_from_sphere(w_sphere(t,vs[2])));
@@ -665,7 +769,7 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 		double ol0=1.0-ol1-ol2;
 		int r=d->nroots;
 		d->l1[r]=ol1; d->l2[r]=ol2;
-		if(w_far) {
+		if(w_far||z_far) {
 			// The root was found in (wr,zr); convert back to an ordinary
 			// (possibly huge but finite) (w,z) point for downstream code
 			// (crossing-node identity itself only ever uses l1,l2, which
@@ -756,25 +860,61 @@ vec<3,double> to_sphere(cx w) {
 	return p;
 }
 
-// Radial displacement for the "onion" projection: a fixed-angle
-// projection of w's own stereographic image onto a generic direction in
-// the (x,y) plane of its sphere, bounded to [-1,1] (points on a unit
-// sphere have x^2+y^2<=1). Deliberately not just Re(w)/... along the raw
-// axis: it needs to separate the sheets found at a given z, and every
-// degree-2 catalog curve so far is of the form w^2=f_0(z), so its two
-// roots are always a +-w pair -- any single linear probe of w already
-// separates that (odd under negation), but picking a non-axis-aligned
-// angle keeps it from being blind to some other curve's symmetry instead
-// (e.g. one invariant under w -> -w but not under reflection through the
-// real axis).
+// Radial displacement for the "onion" projection: originally a
+// fixed-angle projection of w's own stereographic image onto a generic
+// direction, relying on every degree-2 catalog curve being of the form
+// w^2=f_0(z) so its two roots are always a +-w pair (odd under
+// negation, so any single linear probe already separates them). That
+// assumption breaks under --generic: F(w,z)=F_raw(GA w+GB,GC z+GD)
+// expands to a monic-in-w quadratic with a nonzero linear term whenever
+// GB!=0, so the two roots sum to a fixed nonzero constant instead of 0
+// (confirmed: for the current --generic GA/GB, w1+w2 ~= -0.57-0.28i,
+// not 0) -- their sphere images are no longer antipodal, so probing one
+// root's own position said nothing about how it related to the other,
+// and the two shells collapsed into each other instead of separating
+// (confirmed visually: --generic onion renders as a nearly featureless
+// blob, vs. clear nested-shell cutaways without it).
+//
+// Fixed by computing the *other* root exactly, via Vieta's on the
+// mesh-coordinate quadratic, and comparing the two roots' projections
+// directly instead of assuming they're antipodal: this generalizes
+// correctly whether or not GB=0, and still gives exactly 0 (no
+// separation) right at a branch point, where the two roots coincide.
+// (n=2-specific, like the rest of the onion projection so far -- see
+// onion_other_root.)
 const double ONION_ANGLE=0.83; // an arbitrary non-special angle (radians)
-double onion_radial(cx w) {
+double onion_axis_proj(cx w) {
 	vec<3,double> s=to_sphere(w);
 	return std::cos(ONION_ANGLE)*s[0]+std::sin(ONION_ANGLE)*s[1]; // in [-1,1]
+}
+// The companion root of w at the same z: F(w,z)=F_raw(GA w+GB,GC z+GD)
+// expands (for a degree-2, monic-in-its-first-argument F_raw) to
+// GA^2 w^2 + [2 GA GB + GA f_1(Z)] w + [...], Z=GC z+GD -- so by
+// Vieta's, w1+w2 = -(2 GB + f_1(Z))/GA (reduces to the plain -f_1(z)
+// when GA=1,GB=0, the non-generic default).
+cx onion_other_root(cx w, cx z) {
+	cx Z=GC*z+GD;
+	cx sum=-(cx(2,0)*GB+g_F.f(1,Z))/GA;
+	return sum-w;
+}
+double onion_radial(cx w, cx z) {
+	double t1=onion_axis_proj(w), t2=onion_axis_proj(onion_other_root(w,z));
+	return (t1-t2)/2.0; // in [-1,1]; exactly 0 when w coincides with its companion (a branch point)
 }
 
 bool g_onion=false;
 double g_onion_scale=0.3;
+
+// Visualization cutoff: a polygon with at least one vertex whose
+// projected (Re w, Im w, Re z) point lies farther than g_cutoff from
+// the origin is dropped from the OBJ output entirely, rather than
+// clipped -- the far vertices near a pole proxy (up to the from_sphere
+// placeholder scale of 1e8) would otherwise dominate the model's
+// bounding box. Off (no filtering) unless --cutoff is passed. Only
+// applied in flat (non-onion) mode for now -- onion's radius is always
+// close to 1 by construction (see onion_radial), so this cutoff isn't
+// meaningful there yet.
+double g_cutoff=1e300;
 
 // 4D (w,z) in C_infty^2 -> 3D, for a first look at the extracted
 // surface. Two modes:
@@ -792,7 +932,7 @@ double g_onion_scale=0.3;
 vec<3,double> project_for_viz(cx w, cx z) {
 	if(g_onion) {
 		vec<3,double> dir=to_sphere(z);
-		double r=1.0+g_onion_scale*onion_radial(w);
+		double r=1.0+g_onion_scale*onion_radial(w,z);
 		vec<3,double> p;
 		for(int i=0;i<3;++i) p[i]=r*dir[i];
 		return p;
@@ -811,18 +951,32 @@ vec<3,double> project_for_viz(cx w, cx z) {
 // is a separate step once the projection choice settles down.
 struct obj_writer {
 	ofstream out;
-	int nverts, nfaces;
-	obj_writer(const char* path) : out(path), nverts(0), nfaces(0) {
+	int nverts, nfaces, nclipped;
+	obj_writer(const char* path) : out(path), nverts(0), nfaces(0), nclipped(0) {
 		if(g_onion)
 			out<<"# Riemann surface extraction, onion projection: "
 				<<"direction=z on S^2, radius=1+"<<g_onion_scale<<"*onion_radial(w)\n";
 		else
 			out<<"# Riemann surface extraction, projected via (Re w, Im w, Re z)\n";
+		if(!g_onion && g_cutoff<1e299)
+			out<<"# cutoff: polygons with a vertex farther than "<<g_cutoff<<" from the origin dropped\n";
 	}
 	void write_polygon(const vector<crossing_node>& nodes, const vector<int>& cyc) {
+		vector<vec<3,double> > pts(cyc.size());
+		for(size_t i=0;i<cyc.size();++i)
+			pts[i]=project_for_viz(nodes[cyc[i]].w, nodes[cyc[i]].z);
+		if(!g_onion) {
+			for(size_t i=0;i<pts.size();++i) {
+				double d=sqrt(pts[i][0]*pts[i][0]+pts[i][1]*pts[i][1]+pts[i][2]*pts[i][2]);
+				if(d>g_cutoff) { ++nclipped; return; }
+			}
+		}
 		for(size_t i=0;i<cyc.size();++i) {
-			vec<3,double> p=project_for_viz(nodes[cyc[i]].w, nodes[cyc[i]].z);
-			out<<"v "<<p[0]<<" "<<p[1]<<" "<<p[2]<<"\n";
+			extern double g_imz_min, g_imz_max;
+			double imz=nodes[cyc[i]].z.imag();
+			if(imz<g_imz_min) g_imz_min=imz;
+			if(imz>g_imz_max) g_imz_max=imz;
+			out<<"v "<<pts[i][0]<<" "<<pts[i][1]<<" "<<pts[i][2]<<"\n";
 		}
 		out<<"f";
 		for(size_t i=0;i<cyc.size();++i) out<<" "<<(nverts+(int)i+1);
@@ -843,6 +997,12 @@ int main(int argc, char* argv[]) {
 			g_generic_coords=true;
 			GA=std::polar(1.0,0.7); GB=cx(0.13,0.29);
 			GC=std::polar(1.0,1.1); GD=cx(-0.21,0.17);
+			// Independent, fixed, arbitrary axes/angles for the w- and
+			// z-factor octahedra -- just needs to not be axis-aligned
+			// and to differ between w and z (else the product mesh keeps
+			// its own w<->z symmetry). See g_rot_w/g_rot_z above.
+			g_rot_w.set(0.3,0.5,0.8, 0.9);
+			g_rot_z.set(0.7,-0.2,0.4, 1.3);
 		} else if(arg=="--depth" && i+1<argc) {
 			max_depth=atoi(argv[++i]);
 		} else if(arg=="--threshold" && i+1<argc) {
@@ -853,6 +1013,8 @@ int main(int argc, char* argv[]) {
 			g_onion=true;
 		} else if(arg=="--onion-scale" && i+1<argc) {
 			g_onion_scale=atof(argv[++i]);
+		} else if(arg=="--cutoff" && i+1<argc) {
+			g_cutoff=atof(argv[++i]);
 		} else if(arg=="--list-functions") {
 			cout<<"available functions:"<<endl;
 			print_function_catalog(cout);
@@ -860,7 +1022,7 @@ int main(int argc, char* argv[]) {
 		} else {
 			cerr<<"unrecognized argument: "<<arg<<endl;
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--generic] [--depth N] "
-					<<"[--threshold X] [--onion] [--onion-scale X] [--list-functions]"<<endl;
+					<<"[--threshold X] [--onion] [--onion-scale X] [--cutoff X] [--list-functions]"<<endl;
 			return 1;
 		}
 	}
@@ -884,6 +1046,8 @@ int main(int argc, char* argv[]) {
 	cout<<"projection: "<<(g_onion?"onion":"flat");
 	if(g_onion) cout<<" (scale="<<g_onion_scale<<")";
 	cout<<endl;
+	if(g_cutoff<1e299)
+		cout<<"cutoff: "<<g_cutoff<<(g_onion?" (ignored in onion mode)":"")<<endl;
 
 	// Named after the curve, coordinate mode and projection so runs over
 	// different --function/--generic/--onion combinations never silently
@@ -897,8 +1061,8 @@ int main(int argc, char* argv[]) {
 	for(int wl=0; wl<NLABELS; ++wl) {
 		for(int zl=0; zl<NLABELS; ++zl) {
 			Vertex(T) v=add(t);
-			w_sphere_set(t,v,label_sphere(wl));
-			z_sphere_set(t,v,label_sphere(zl));
+			w_sphere_set(t,v, g_generic_coords ? g_rot_w.apply(label_sphere(wl)) : label_sphere(wl));
+			z_sphere_set(t,v, g_generic_coords ? g_rot_z.apply(label_sphere(zl)) : label_sphere(zl));
 			w_label_set(t,v,wl);
 			z_label_set(t,v,zl);
 			compute_vertex_data(t,v);
@@ -1312,8 +1476,10 @@ int main(int argc, char* argv[]) {
 	cout<<"total output triangles (fan-triangulated): "<<noutput_tris<<endl;
 	cout<<"touching tetrahedra (single point, no edge): "<<ntouching_tets<<endl;
 	cout<<"tetrahedra with an unhandled node count: "<<nbad_tets<<endl;
+	cout<<"[diag] Im(z) range at extracted nodes: ["<<g_imz_min<<", "<<g_imz_max<<"]"<<endl;
 	cout<<"wrote "<<obj_path<<": "<<obj.nverts<<" vertices, "<<obj.nfaces<<" faces "
 			<<"(projection: "<<(g_onion?"onion, z on S^2 + radial w":"Re(w), Im(w), Re(z)")<<")"<<endl;
+	if(obj.nclipped) cout<<"polygons dropped by --cutoff: "<<obj.nclipped<<endl;
 	cout<<"|F|^2 residual at extracted nodes, range: ["<<fres_min<<", "<<fres_max<<"]"<<endl;
 
 	cout<<"ok/bad cells by cell level:"<<endl;

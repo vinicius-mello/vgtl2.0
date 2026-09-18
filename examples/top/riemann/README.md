@@ -225,37 +225,61 @@ from adjacent 4-simplices -- see *Known limitations*).
   clean cycles) is far more common when the curve's own symmetry lines
   up with the seed octahedron's (real coefficients, seed vertices on
   the real/imaginary axes) -- e.g. `w^2-z` has a branch point exactly
-  at the seed vertex `z=0`. `--generic` breaks this alignment via a
-  fixed complex-affine change of coordinates and consistently cuts the
-  bad-cell rate by roughly half to an order of magnitude on the curves
-  tested so far, without changing the curve. The remainder still
-  shrinks with `--depth` (roughly halving every +2 levels in the runs
-  so far) and concentrates one level below the cap, consistent with a
-  sampling limit rather than a structural one -- not yet fully
-  isolated.
-- **Pole handling is projective only at the joint corner.** `F` is monic
-  in `w`, so `w=∞` is never a root for finite `z` (the `w`-homogenized
-  polynomial is `1` at `w'=0`) -- every catalog curve so far only ever
-  needs a second chart at the *joint* `(w,z)->(∞,∞)` corner, which is now
-  handled properly: `triangle_intersection` switches a triangle to the
+  at the seed vertex `z=0`. `--generic` breaks this alignment for the
+  five *finite* landmark vertices via a fixed complex-affine change of
+  coordinates applied to `F` (`GA w+GB`, `GC z+GD`), and independently
+  breaks it for the *infinite* ones (`w=∞`, `z=∞`) via a fixed 3D
+  rotation applied to the seed octahedron's own vertex placement
+  instead (`g_rot_w`/`g_rot_z`, `sphere_rot::apply`) -- these are two
+  different mechanisms because an affine map always fixes infinity, so
+  it can never move the seed's own pole vertices off of it, while a
+  sphere rotation (itself a unitary Möbius transform of `C_∞`, just
+  applied to mesh construction rather than to `F`) can. This matters:
+  by Riemann-Hurwitz a degree-`n` covering of `P^1` needs a fixed total
+  ramification count, so a curve with an odd number of *finite* branch
+  points (e.g. `parabola`, one at `z=0`) is forced to have one at
+  `z=∞` too -- confirmed directly (`branch_gap_corner(zr)->0` as
+  `zr->0`). Before the rotation fix, that seed vertex sat exactly on
+  this real branch point *forever*, at every depth (Maubach bisection
+  never touches an original seed vertex), giving a ~38-40% failure rate
+  among corner-adjacent cells that stayed flat instead of shrinking
+  with `--depth` -- unlike the ordinary alignment-sensitivity case
+  above, which does shrink (roughly halving every +2 levels). With the
+  rotation, no seed vertex sits at a literal pole any more, so this
+  class of failure is gone (parabola, `--depth 10`: bad cells corner
+  went from 174/190 to 0; overall bad_cells 177->16).
+  `cell_priority` also now force-refines any cell whose 5 vertices
+  straddle the `sphere_is_far` cutoff in `w` or `z` (`straddles_far`),
+  on the theory that a cell mixing ordinary- and corner-chart triangles
+  is inherently risky -- kept as a real improvement for configurations
+  where it matters, though at the depths/thresholds tested here every
+  such cell was already being pushed to `max_depth` by `branch_gap`
+  anyway, so it measured as a no-op on top of the rotation fix.
+- **Pole handling is projective at the joint corner.** `F` is monic in
+  `w`, so `w=∞` is never a root for finite `z` (the `w`-homogenized
+  polynomial is `1` at `w'=0`) -- the only place a second chart is
+  needed is where `w` and `z` diverge *together*, handled via the
   doubly-homogenized polynomial `K(wr,zr) = wr^n zr^dz F_raw(1/wr,1/zr)`
-  (`wr=1/(GA w+GB)`, `zr=1/(GC z+GD)`, finite at `(wr,zr)=(0,0)`) once any
-  vertex crosses `sphere_is_far` (an ordinary-chart `|w|` or `|z|` past
-  `1e6`, checked via the vertex's sphere coordinates so it costs nothing
-  extra for ordinary vertices); `cell_priority`'s diameter is measured on
-  the sphere (bounded everywhere, unlike a chart diameter) and
-  `branch_gap_corner` mirrors `branch_gap` in the `(wr,zr)` chart, so
-  refinement is no longer starved right at the corner by a raw `w`-gap
-  that diverges there. A vertex far in only *one* of `w`/`z` (the other
-  finite) stays excluded, since a monic-in-`w` curve never visits that
-  region.
+  (`wr=1/(GA w+GB)`, `zr=1/(GC z+GD)`, finite at `(wr,zr)=(0,0)`),
+  switched to per-triangle once *either* vertex crosses `sphere_is_far`
+  (an ordinary-chart `|w|` or `|z|` past `1e6`). It used to require
+  *both* `w` and `z` far before switching charts, on the assumption
+  that "far in only one" never occurs for a monic-in-`w` curve -- true
+  only in the literal `z=∞` limit: on `parabola`, `|w|~sqrt(|z|)`, so
+  `z` crosses the cutoff long before `w` does, and that whole band was
+  silently excluded (confirmed: the excluded-triangle count *grew*
+  with `--depth` instead of shrinking). Fixed by switching to the
+  corner chart whenever *either* is far; `from_wr`/`from_zr` also now
+  clamp their recovered magnitude to the same `1e8` practical-infinity
+  scale used elsewhere, since a root can otherwise land arbitrarily far
+  out and break the plain-`F` residual diagnostic (not the solve
+  itself, which stays well-conditioned in `(wr,zr)`).
 
   This closes the hole completely for a curve whose point at infinity is
   a *regular* point of `K=0` there (verified on `parabola`: `K(wr,zr) =
   zr-wr^2`, `∂K/∂zr=1≠0` at the origin -- the residual gap shrinks with
-  depth exactly like anywhere else, confirmed empirically going from
-  `--depth 12` to `--depth 15`). It does *not* fully close the hole for
-  `elliptic`: there, `K(wr,zr) = zr^3+(zr^2-1)wr^2`, and `K`, `∂K/∂wr`,
+  depth exactly like anywhere else). It does *not* fully close the hole
+  for `elliptic`: there, `K(wr,zr) = zr^3+(zr^2-1)wr^2`, and `K`, `∂K/∂wr`,
   `∂K/∂zr` all vanish at `(wr,zr)=(0,0)` -- a genuine cusp (`wr^2≈zr^3`
   near the origin), because `w` grows like `z^1.5` along this curve, a
   power incompatible with the `C_∞ x C_∞ = P^1 x P^1` grid. This is a
@@ -263,9 +287,12 @@ from adjacent 4-simplices -- see *Known limitations*).
   (its standard smooth model lives in `P^2` instead, where infinity is a
   single regular point), not a bug -- more depth shrinks the residual gap
   somewhat but a cusp's degenerate tangent keeps it from vanishing the
-  way it does at a regular point. Resolving that fully would need a
-  curve-specific local (Puiseux) reparametrization at the singular point,
-  well beyond the general per-triangle treatment here.
+  way it does at a regular point, and the `--generic` rotation fix above
+  doesn't touch this either: a cusp is a coordinate-independent property
+  of the curve, not an artifact of where the mesh's vertices sit.
+  Resolving that fully would need a curve-specific local (Puiseux)
+  reparametrization at the singular point, well beyond the general
+  per-triangle treatment here.
 - **Memory grows monotonically with depth.** `nmt`'s cell containers
   are append-only -- Maubach subdivision marks parent cells
   not-current rather than freeing them -- so deep runs can exhaust
@@ -290,7 +317,7 @@ elsewhere -- it must point at VGTL's top-level `include/` directory).
 Run:
 
 ```sh
-./riemann [--function N] [--generic] [--depth N] [--threshold X] [--onion] [--onion-scale X] [--list-functions]
+./riemann [--function N] [--generic] [--depth N] [--threshold X] [--onion] [--onion-scale X] [--cutoff X] [--list-functions]
 ```
 
 | flag | default | meaning |
@@ -301,6 +328,7 @@ Run:
 | `--threshold X` | `0.1` | refinement stops popping cells once the priority queue's max drops below this |
 | `--onion` | off | export via the onion projection (nested spheres) instead of the flat `(Re w, Im w, Re z)` one -- see Phase 4 |
 | `--onion-scale X` | `0.3` | radial spread for `--onion`; output radius stays within `[1-X, 1+X]` |
+| `--cutoff X` | off | drop any extracted polygon with a vertex farther than `X` from the origin in the projected 3D point -- keeps pole-proxy outliers from blowing out the flat projection's bounding box; ignored under `--onion`, where the radius is already `~1` by construction |
 | `--list-functions` | -- | print the curve catalog and exit |
 
 Output is `riemann_surface_<name>[_generic][_onion].obj` in the working
