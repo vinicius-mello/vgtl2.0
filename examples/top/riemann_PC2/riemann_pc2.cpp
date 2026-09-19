@@ -44,6 +44,38 @@ typedef vec<3,cx> pt3;
 
 pt3 mkpt(cx a, cx b, cx c) { pt3 p; p[0]=a; p[1]=b; p[2]=c; return p; }
 
+// Storage-only half-precision twin of pt3/cx (see narrow_pt/widen_pt
+// below) -- isolated test of extra_data<2>::pt[] alone (the Newton root
+// cache, read back only for chart-selection heuristics and final mesh
+// export), NOT extra_data<0>::p (vertex positions, which feed
+// fs_barycenter's recursive averaging across refinement depth).
+typedef complex<float> cxf;
+typedef vec<3,cxf> pt3f;
+pt3f narrow_pt(const pt3& p) {
+	pt3f q;
+	for(int i=0;i<3;++i) q[i]=cxf((float)p[i].real(),(float)p[i].imag());
+	return q;
+}
+pt3 widen_pt(const pt3f& p) {
+	pt3 q;
+	for(int i=0;i<3;++i) q[i]=cx((double)p[i].real(),(double)p[i].imag());
+	return q;
+}
+
+// Pool for the Newton root cache: the overwhelming majority of
+// triangles have ZERO roots (measured: 7083822/7211426 = 98.2% for the
+// parabola baseline, still 98.2% for the quartic), so reserving 2
+// slots' worth of storage (pt3f pt[2] + double l1[2],l2[2]) INSIDE
+// every extra_data<2> paid for a near-empty array on ~98% of triangles.
+// Instead, extra_data<2> holds a single index into this flat pool
+// (root_idx, -1 if empty); a triangle with nroots>0 owns the
+// contiguous run g_roots[root_idx .. root_idx+nroots-1]. Never shrinks
+// (matches nmt's own no-real-deletion semantics -- see del() for k!=Dim
+// in model/nmt.hpp), same lifetime pattern extra_data itself already
+// has.
+struct root_data { pt3f pt; double l1,l2; };
+vector<root_data> g_roots;
+
 namespace vgtl {
 
 	template <>
@@ -71,12 +103,13 @@ namespace vgtl {
 	// homogeneous point per root now (not a separate w/z pair).
 	template <>
 	struct extra_data<2> {
-		// Members ordered largest-alignment-first (pt3/double @8-byte
-		// align, then float @4-byte, then the byte-sized flags last) so
-		// the compiler needs no interior padding -- only trailing padding
-		// up to the struct's own (8-byte) alignment requirement.
-		pt3 pt[2];
-		double l1[2], l2[2];
+		// Index into the global g_roots pool (see above), not the roots
+		// themselves -- most triangles have none (measured: 98.2% for
+		// both the parabola and quartic catalog curves), so paying for
+		// 2 root slots inline here was wasted on nearly every triangle.
+		// -1 = no roots. A triangle with nroots>0 owns the contiguous
+		// run g_roots[root_idx .. root_idx+nroots-1].
+		int root_idx;
 		// --proximity/--bernstein (see compute_bernstein_bounds): a
 		// certified real-interval enclosure of Re(F) and Im(F) over this
 		// 2-simplex, from its Bernstein-Bezier coefficients -- immutable
@@ -97,7 +130,7 @@ namespace vgtl {
 		unsigned char computed;
 		unsigned char nroots;
 		unsigned char bernstein_computed;
-		extra_data() : computed(0), nroots(0), bernstein_computed(0) {}
+		extra_data() : root_idx(-1), computed(0), nroots(0), bernstein_computed(0) {}
 	};
 
 }
@@ -1010,29 +1043,44 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 	tri_frame fr;
 	{ cx w3[3]={w0,w1,w2}, z3[3]={z0,z1,z2}; build_tri_frame(w3,z3,fr); }
 
-	for(int s=0; s<nseeds && d->nroots<2; ++s) {
+	// Found roots stay in local temporaries -- exactly the old d->l1/
+	// d->l2/d->pt fields, just not struct members any more -- until the
+	// final count is known, then get pushed as one contiguous run into
+	// g_roots below (see extra_data<2>::root_idx).
+	double tmpl1[2],tmpl2[2]; pt3 tmppt[2]; int nfound=0;
+	for(int s=0; s<nseeds && nfound<2; ++s) {
 		double sx,sy; bary_to_xy(fr,seeds[s][0],seeds[s][1],sx,sy);
 		double ol1,ol2,rF,rG; int riter;
 		if(!newton_on_triangle(fr,sx,sy,ol1,ol2,Ffun,Fwfun,Fzfun,rF,rG,riter)) continue;
 		bool dup=false;
-		for(int r=0;r<d->nroots;++r)
-			if(fabs(d->l1[r]-ol1)<1e-7 && fabs(d->l2[r]-ol2)<1e-7) dup=true;
+		for(int r=0;r<nfound;++r)
+			if(fabs(tmpl1[r]-ol1)<1e-7 && fabs(tmpl2[r]-ol2)<1e-7) dup=true;
 		if(dup) continue;
 		double ol0=1.0-ol1-ol2;
-		int r=d->nroots;
-		d->l1[r]=ol1; d->l2[r]=ol2;
+		int r=nfound;
+		tmpl1[r]=ol1; tmpl2[r]=ol2;
 		cx aroot=ol0*w0+ol1*w1+ol2*w2, broot=ol0*z0+ol1*z1+ol2*z2;
-		d->pt[r]=rehomogenize(chart,aroot,broot);
-		++d->nroots;
+		tmppt[r]=rehomogenize(chart,aroot,broot);
+		++nfound;
 		g_resid_F.push_back(rF); g_resid_geom.push_back(rG); g_resid_iters.push_back(riter);
+	}
+	d->nroots=(unsigned char)nfound;
+	if(nfound>0) {
+		d->root_idx=(int)g_roots.size();
+		for(int r=0;r<nfound;++r) {
+			root_data rd; rd.pt=narrow_pt(tmppt[r]); rd.l1=tmpl1[r]; rd.l2=tmpl2[r];
+			g_roots.push_back(rd);
+		}
 	}
 }
 
 int triangle_nroots(const T& t, Simplex(T,2) tri) { return attr(t,tri)->nroots; }
-void triangle_point(const T& t, Simplex(T,2) tri, int r, pt3& p) { p=attr(t,tri)->pt[r]; }
+void triangle_point(const T& t, Simplex(T,2) tri, int r, pt3& p) {
+	p=widen_pt(g_roots[attr(t,tri)->root_idx+r].pt);
+}
 void triangle_bary(const T& t, Simplex(T,2) tri, int r, double& l0, double& l1, double& l2) {
-	const extra_data<2>* d=attr(t,tri);
-	l1=d->l1[r]; l2=d->l2[r]; l0=1.0-l1-l2;
+	const root_data& rd=g_roots[attr(t,tri)->root_idx+r];
+	l1=rd.l1; l2=rd.l2; l0=1.0-l1-l2;
 }
 
 // --- Crossing-node identity and cycle extraction: unchanged in spirit
@@ -1470,6 +1518,22 @@ int main(int argc, char* argv[]) {
 	if(obj.nclipped) cout<<"polygons dropped by --cutoff: "<<obj.nclipped<<endl;
 	if(g_bernstein) cout<<"triangles Bernstein-pruned (Newton skipped, certified no root): "
 			<<g_bernstein_pruned_faces<<endl;
+
+	// Diagnostic: how many 2-simplices actually carry 2 roots (the
+	// nroots==2 case extra_data<2>::pt[2]/l1[2]/l2[2] exist for), vs 1 or
+	// 0 -- triangle_intersection() is idempotent (see d->computed), so
+	// this re-walk is free, every triangle here was already resolved
+	// during extraction above.
+	{
+		long hist[3]={0,0,0};
+		Simplex_it(T,2) si,send;
+		for(simplices(t,si,send); si!=send; ++si) {
+			if(!is_current(t,*si)) continue;
+			triangle_intersection(t,*si);
+			++hist[triangle_nroots(t,*si)];
+		}
+		cout<<"triangle nroots histogram: 0="<<hist[0]<<" 1="<<hist[1]<<" 2="<<hist[2]<<endl;
+	}
 
 	// --- Solution-error statistics: |F| residual and the scale-invariant
 	// geometric estimate |F|/|dF/d(x,y)| (see newton_on_triangle) over
