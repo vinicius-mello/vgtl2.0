@@ -1076,7 +1076,34 @@ vec<3,double> to_sphere(cx w) {
 	return p;
 }
 
-vec<3,double> project_for_viz(const pt3& p) {
+// Picks ONE chart for an entire output polygon (worst-case-best rule,
+// same shape as pick_chart/triangle_intersection's own choice, but
+// maximizing the minimum |coordinate| across ALL of the polygon's
+// nodes, not just one triangle's 3 vertices). Fixes a real bug: the
+// previous project_for_viz picked a chart independently PER POINT, so
+// a polygon whose nodes came from different triangles/tetrahedra could
+// get its vertices dehomogenized in DIFFERENT (a,b) frames -- each
+// point individually correct, but stitched together into a polygon
+// spanning two incompatible coordinate systems. Confirmed empirically
+// before this fix (not just suspected): 1206/173725 polygons (0.69%)
+// had a per-point chart mismatch, matching almost exactly the 3106
+// edges (0.52%, ~2.5 per mismatched polygon) sitting 10x+ longer than
+// the median in the exported mesh -- the source of the "ribbon spray"
+// artifact seen in renders despite a low bad-cell rate.
+int pick_chart_polygon(const vector<crossing_node>& nodes, const vector<int>& cyc) {
+	int chart=0; double best=-1;
+	for(int c=0;c<3;++c) {
+		double m=1e300;
+		for(size_t i=0;i<cyc.size();++i) {
+			double v=std::abs(nodes[cyc[i]].p[c]);
+			if(v<m) m=v;
+		}
+		if(m>best) { best=m; chart=c; }
+	}
+	return chart;
+}
+
+vec<3,double> project_for_viz(const pt3& p, int chart) {
 	if(g_onion) {
 		vec<3,double> dir=to_sphere(p[2]); // Z: direction on S^2
 		double bump=std::abs(p[0])+std::abs(p[1]); // |X|+|Y|: radial displacement
@@ -1085,8 +1112,6 @@ vec<3,double> project_for_viz(const pt3& p) {
 		for(int i=0;i<3;++i) out[i]=r*dir[i];
 		return out;
 	}
-	int chart=0; double best=-1;
-	for(int c=0;c<3;++c) if(std::abs(p[c])>best) { best=std::abs(p[c]); chart=c; }
 	cx a,b; dehomogenize(chart,p,a,b);
 	vec<3,double> r;
 	r[0]=a.real(); r[1]=a.imag(); r[2]=b.real();
@@ -1107,8 +1132,9 @@ struct obj_writer {
 			out<<"# cutoff: polygons with a vertex farther than "<<g_cutoff<<" from the origin dropped\n";
 	}
 	void write_polygon(const vector<crossing_node>& nodes, const vector<int>& cyc) {
+		int chart=g_onion ? 0 : pick_chart_polygon(nodes,cyc); // one chart for the whole polygon
 		vector<vec<3,double> > pts(cyc.size());
-		for(size_t i=0;i<cyc.size();++i) pts[i]=project_for_viz(nodes[cyc[i]].p);
+		for(size_t i=0;i<cyc.size();++i) pts[i]=project_for_viz(nodes[cyc[i]].p,chart);
 		if(!g_onion) {
 			for(size_t i=0;i<pts.size();++i) {
 				double dd=sqrt(pts[i][0]*pts[i][0]+pts[i][1]*pts[i][1]+pts[i][2]*pts[i][2]);
