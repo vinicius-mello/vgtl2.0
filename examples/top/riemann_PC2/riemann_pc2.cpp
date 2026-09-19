@@ -68,7 +68,14 @@ namespace vgtl {
 		int nroots;
 		pt3 pt[2];
 		double l1[2], l2[2];
-		extra_data() : computed(false), nroots(0) {}
+		// --proximity/--bernstein (see compute_bernstein_bounds): a
+		// certified real-interval enclosure of Re(F) and Im(F) over this
+		// 2-simplex, from its Bernstein-Bezier coefficients -- immutable
+		// once the triangle's 3 vertices exist, cached the same way the
+		// Newton roots above are.
+		bool bernstein_computed;
+		double reLo,reHi,imLo,imHi;
+		extra_data() : computed(false), nroots(0), bernstein_computed(false) {}
 	};
 
 }
@@ -433,6 +440,361 @@ double cell_priority(const T& t, Cell(T) cv) {
 	return priority;
 }
 
+// --- Bernstein-certified refinement/pruning (--bernstein), a second,
+// independent refinement criterion alongside gradient dispersion above
+// -- an experiment in exploiting that F is a genuine polynomial (not
+// just "some function"), per the user's proposal. Two phases:
+//
+// (1) For a 2-simplex, restricting F to it (X,Y,Z = l0 P0+l1 P1+l2 P2,
+// real barycentric l0,l1,l2) gives a polynomial of the SAME degree d in
+// (l0,l1,l2), homogeneous since F is -- i.e. exactly a degree-d
+// triangular Bezier/Bernstein patch. Its Bernstein-Bezier coefficients
+// enclose its range on the triangle (they're a partition-of-unity
+// convex combination), so [min,max] of Re and Im of those coefficients
+// is a CERTIFIED enclosure of Re(F) and Im(F) on that triangle -- not a
+// heuristic. A cell can safely be dropped from refinement forever, not
+// just deprioritized, once NONE of its 10 triangular faces has both
+// ranges straddling 0 (dim(triangle)+dim(zero locus)-dim(ambient)=
+// 2+2-4=0, same reasoning triangle_intersection already relies on: if
+// the zero locus can't cross ANY of a cell's 2-faces, it can't be
+// passing through the cell's interior either, by the same argument that
+// makes the reconstructed polygon's vertices always triangle-crossings).
+//
+// (2) Extraction (triangle_intersection) reuses these same cached
+// bounds to skip Newton's seed search entirely on a triangle already
+// certified to have no root -- kept as Newton otherwise (per the user's
+// choice), not replaced by a Bernstein-subdivision root isolator.
+bool g_bernstein=false;
+int g_bernstein_level=0; // --bernstein-level: see bernstein_bounds_recursive
+
+// Forward declarations -- real definitions are with the rest of the
+// chart machinery, further down (F_chart0/1/2 etc.), but pick_chart
+// and compute_bernstein_bounds need to match triangle_intersection's
+// own chart choice exactly (see the domain-mismatch note below), so
+// they're declared here and defined the same as always down there.
+void dehomogenize(int chart, const pt3& p, cx& a, cx& b);
+pt3 rehomogenize(int chart, cx a, cx b);
+
+// Picks the same best-conditioned chart triangle_intersection does
+// (max over charts of the min |coordinate| across the 3 vertices) --
+// factored out so both call sites are provably using the identical
+// rule, not two copies that could drift apart.
+int pick_chart(const pt3 p[3]) {
+	int chart=0; double bestscore=-1;
+	for(int c=0;c<3;++c) {
+		double m=std::min(std::abs(p[0][c]), std::min(std::abs(p[1][c]),std::abs(p[2][c])));
+		if(m>bestscore) { bestscore=m; chart=c; }
+	}
+	return chart;
+}
+
+// A degree-d homogeneous polynomial in (l0,l1,l2), stored as its
+// monomial coefficients c[a][b] for l0^a l1^b l2^(d-a-b) (a+b<=d<=4 for
+// every catalog curve, so a plain 5x5 grid suffices -- no map/tree
+// needed for exponents this small).
+struct bary_poly {
+	int d;
+	cx c[5][5];
+	bary_poly() : d(0) { for(int a=0;a<5;++a) for(int b=0;b<5;++b) c[a][b]=cx(0,0); }
+};
+
+double fact3(int n) { double r=1; for(int i=2;i<=n;++i) r*=i; return r; }
+double multinom3(int d,int a,int b,int cc) { return fact3(d)/(fact3(a)*fact3(b)*fact3(cc)); }
+
+// (l0*X0+l1*X1+l2*X2)^n via the trinomial theorem.
+bary_poly pow_linear3(cx X0,cx X1,cx X2,int n) {
+	bary_poly r; r.d=n;
+	for(int p=0;p<=n;++p)
+		for(int q=0;q<=n-p;++q) {
+			int rr=n-p-q;
+			cx coeff=multinom3(n,p,q,rr)*ipow(X0,p)*ipow(X1,q)*ipow(X2,rr);
+			r.c[p][q]+=coeff;
+		}
+	return r;
+}
+
+bary_poly mul_bary(const bary_poly& A, const bary_poly& B) {
+	bary_poly r; r.d=A.d+B.d;
+	for(int a1=0;a1<=A.d;++a1)
+		for(int b1=0;a1+b1<=A.d;++b1) {
+			if(A.c[a1][b1]==cx(0,0)) continue;
+			for(int a2=0;a2<=B.d;++a2)
+				for(int b2=0;a2+b2<=B.d;++b2)
+					r.c[a1+a2][b1+b2]+=A.c[a1][b1]*B.c[a2][b2];
+		}
+	return r;
+}
+
+// F restricted to the triangle's own best-conditioned CHART (the exact
+// same one triangle_intersection picks via pick_chart), as a uniform
+// degree-F.d homogeneous polynomial in barycentric (l0,l1,l2) of the
+// chart's 2 free coordinates (a,b) -- NOT yet Bernstein coefficients
+// (see caller). This replaces an earlier version that composed F in
+// the RAW ambient (X,Y,Z) affine barycentric combination instead: that
+// bounded a genuinely different 2D patch than the one
+// triangle_intersection actually searches (dehomogenize each vertex to
+// the chart, THEN interpolate) -- the two coincide at the 3 corners but
+// can diverge for larger triangles, and a --bernstein-selftest-style
+// check plus real --bernstein-level>0 runs (see riemann_pc2_bernstein_
+// refinement memory) showed the mismatch is real, not theoretical:
+// tightening the OLD (wrong-domain) enclosure made extraction WORSE,
+// silently dropping genuine crossings. Dehomogenizing first and
+// building the SAME (a,b)-chart barycentric patch triangle_intersection
+// implicitly searches removes that mismatch by construction.
+//
+// A term c*X^i*Y^j*Z^k, dehomogenized (one of X,Y,Z set to 1 per
+// chart), contributes c*a^ea*b^eb of degree ea+eb<=F.d -- generally
+// LESS than F.d now (whichever original exponent got dropped), so each
+// term needs "degree elevation" (multiply by (l0+l1+l2)^(F.d-ea-eb),
+// exactly 1 on the simplex l0+l1+l2=1, so this doesn't change the
+// function's values there) before it can be added into a single
+// uniform-degree grid -- standard CAGD technique, needed here because
+// the dehomogenized F is no longer homogeneous the way the raw ambient
+// one was.
+bary_poly compose_to_chart(const poly_F3& F, int chart, cx a0,cx a1,cx a2, cx b0,cx b1,cx b2) {
+	bary_poly acc; acc.d=F.d;
+	for(size_t k=0;k<F.t.size();++k) {
+		const term3& tm=F.t[k];
+		int ea,eb;
+		switch(chart) {
+			case 0: ea=tm.e[1]; eb=tm.e[2]; break; // X=1: a=Y,b=Z
+			case 1: ea=tm.e[0]; eb=tm.e[2]; break; // Y=1: a=X,b=Z
+			default: ea=tm.e[0]; eb=tm.e[1]; break; // Z=1: a=X,b=Y
+		}
+		bary_poly pa=pow_linear3(a0,a1,a2,ea);
+		bary_poly pb=pow_linear3(b0,b1,b2,eb);
+		bary_poly term=mul_bary(pa,pb);
+		int termdeg=ea+eb;
+		if(termdeg<acc.d) {
+			bary_poly elev=pow_linear3(cx(1,0),cx(1,0),cx(1,0),acc.d-termdeg); // (l0+l1+l2)^(F.d-termdeg)
+			term=mul_bary(term,elev);
+		}
+		for(int a=0;a<=acc.d;++a)
+			for(int b=0;a+b<=acc.d;++b)
+				acc.c[a][b]+=tm.c*term.c[a][b];
+	}
+	return acc;
+}
+
+// A point in the triangle's chart (the 2 free affine coordinates, e.g.
+// a=Y/X,b=Z/X for chart 0) -- the recursion below works entirely in
+// this 2D space, matching triangle_intersection's own domain, rather
+// than in the raw 3D ambient one.
+struct cpt { cx a,b; };
+cpt lerp_cpt(const cpt& p, const cpt& q) { cpt r; r.a=0.5*(p.a+q.a); r.b=0.5*(p.b+q.b); return r; }
+
+void bernstein_leaf_bounds(const poly_F3& F, int chart, const cpt& P0, const cpt& P1, const cpt& P2,
+														double& reLo, double& reHi, double& imLo, double& imHi) {
+	bary_poly m=compose_to_chart(F,chart,P0.a,P1.a,P2.a,P0.b,P1.b,P2.b);
+	reLo=1e300; reHi=-1e300; imLo=1e300; imHi=-1e300;
+	for(int a=0;a<=m.d;++a) {
+		for(int b=0;a+b<=m.d;++b) {
+			int cc=m.d-a-b;
+			cx beta=m.c[a][b]/multinom3(m.d,a,b,cc); // Bernstein coefficient
+			double re=beta.real(), im=beta.imag();
+			if(re<reLo) reLo=re; if(re>reHi) reHi=re;
+			if(im<imLo) imLo=im; if(im>imHi) imHi=im;
+		}
+	}
+}
+
+void get_subtriangle(int s, const cpt& P0,const cpt& P1,const cpt& P2,
+											const cpt& M01,const cpt& M12,const cpt& M20,
+											cpt& A, cpt& B, cpt& C) {
+	switch(s) {
+		case 0: A=P0;  B=M01; C=M20; break;
+		case 1: A=M01; B=P1;  C=M12; break;
+		case 2: A=M20; B=M12; C=P2;  break;
+		default: A=M01; B=M12; C=M20; break; // the middle, "upside-down" piece
+	}
+}
+
+// Bernstein bounds for F restricted to the chart-triangle (P0,P1,P2),
+// optionally tightened by `level` rounds of standard 1-to-4 triangular
+// subdivision (connect edge midpoints, recurse on each of the 4
+// children, union their bounds) before taking the enclosure -- level 0
+// is exactly the single top-level patch. This is de Casteljau-style
+// subdivision: it tightens the CERTIFIED enclosure (the union of 4
+// smaller boxes is always a subset of, never bigger than, the parent
+// box, and generically much smaller once each child sees less of the
+// curve's own bend) WITHOUT touching the real simplicial mesh at all --
+// P0,P1,P2 are always the triangle's own fixed (dehomogenized) chart
+// coordinates; the recursion's extra points are purely virtual samples
+// for this computation.
+void bernstein_bounds_recursive(const poly_F3& F, int chart, const cpt& P0, const cpt& P1, const cpt& P2,
+																 int level, double& reLo, double& reHi, double& imLo, double& imHi) {
+	if(level<=0) { bernstein_leaf_bounds(F,chart,P0,P1,P2,reLo,reHi,imLo,imHi); return; }
+	cpt M01=lerp_cpt(P0,P1), M12=lerp_cpt(P1,P2), M20=lerp_cpt(P2,P0);
+	reLo=1e300; reHi=-1e300; imLo=1e300; imHi=-1e300;
+	for(int s=0;s<4;++s) {
+		cpt A,B,C; get_subtriangle(s,P0,P1,P2,M01,M12,M20,A,B,C);
+		double srl,srh,sil,sih;
+		bernstein_bounds_recursive(F,chart,A,B,C,level-1,srl,srh,sil,sih);
+		if(srl<reLo) reLo=srl; if(srh>reHi) reHi=srh;
+		if(sil<imLo) imLo=sil; if(sih>imHi) imHi=sih;
+	}
+}
+
+// --bernstein-selftest: direct numerical verification, independent of
+// the mesh, that (a) level-0 and level-1 enclosures both actually
+// contain the TRUE range of Re(F)/Im(F) over the triangle's own CHART
+// domain (the same one triangle_intersection searches -- see
+// compose_to_chart's comment), sampled by brute force, and (b) level-1's
+// box is a subset of level-0's (mathematically required: subdivision
+// only tightens). Kept as a real regression check, not just a one-off:
+// this is what caught the raw-ambient-vs-chart domain mismatch in the
+// first place.
+bool g_bernstein_selftest=false;
+
+void bernstein_selftest() {
+	pt3 P0=normalize3(mkpt(cx(1,0),cx(0.3,0.1),cx(-0.2,0.4)));
+	pt3 P1=normalize3(mkpt(cx(0.2,-0.5),cx(1,0),cx(0.1,0.3)));
+	pt3 P2=normalize3(mkpt(cx(-0.3,0.2),cx(0.4,-0.1),cx(1,0)));
+	pt3 p[3]={P0,P1,P2};
+	int chart=pick_chart(p);
+	cpt Q0,Q1,Q2;
+	dehomogenize(chart,P0,Q0.a,Q0.b);
+	dehomogenize(chart,P1,Q1.a,Q1.b);
+	dehomogenize(chart,P2,Q2.a,Q2.b);
+
+	double l0Lo,l0Hi,i0Lo,i0Hi, l1Lo,l1Hi,i1Lo,i1Hi;
+	bernstein_bounds_recursive(g_F,chart,Q0,Q1,Q2,0,l0Lo,l0Hi,i0Lo,i0Hi);
+	bernstein_bounds_recursive(g_F,chart,Q0,Q1,Q2,1,l1Lo,l1Hi,i1Lo,i1Hi);
+
+	double trueReLo=1e300,trueReHi=-1e300,trueImLo=1e300,trueImHi=-1e300;
+	std::mt19937 rng(1);
+	std::uniform_real_distribution<double> ud(0.0,1.0);
+	int N=2000000;
+	for(int s=0;s<N;++s) {
+		double u=ud(rng), v=ud(rng);
+		if(u+v>1.0) { u=1.0-u; v=1.0-v; }
+		double L0=1.0-u-v, L1=u, L2=v;
+		cx a=L0*Q0.a+L1*Q1.a+L2*Q2.a;
+		cx b=L0*Q0.b+L1*Q1.b+L2*Q2.b;
+		pt3 P=rehomogenize(chart,a,b);
+		cx val=eval_poly3(g_F,P[0],P[1],P[2]);
+		double re=val.real(), im=val.imag();
+		if(re<trueReLo) trueReLo=re; if(re>trueReHi) trueReHi=re;
+		if(im<trueImLo) trueImLo=im; if(im>trueImHi) trueImHi=im;
+	}
+
+	cout<<"chart: "<<chart<<endl;
+	cout<<"level 0 box:  Re["<<l0Lo<<","<<l0Hi<<"]  Im["<<i0Lo<<","<<i0Hi<<"]"<<endl;
+	cout<<"level 1 box:  Re["<<l1Lo<<","<<l1Hi<<"]  Im["<<i1Lo<<","<<i1Hi<<"]"<<endl;
+	cout<<"true range (brute force, "<<N<<" samples): Re["<<trueReLo<<","<<trueReHi
+			<<"]  Im["<<trueImLo<<","<<trueImHi<<"]"<<endl;
+
+	bool ok=true;
+	if(!(l0Lo<=trueReLo+1e-9 && l0Hi>=trueReHi-1e-9)) { cout<<"FAIL: level-0 Re doesn't enclose true range"<<endl; ok=false; }
+	if(!(i0Lo<=trueImLo+1e-9 && i0Hi>=trueImHi-1e-9)) { cout<<"FAIL: level-0 Im doesn't enclose true range"<<endl; ok=false; }
+	if(!(l1Lo<=trueReLo+1e-9 && l1Hi>=trueReHi-1e-9)) { cout<<"FAIL: level-1 Re doesn't enclose true range"<<endl; ok=false; }
+	if(!(i1Lo<=trueImLo+1e-9 && i1Hi>=trueImHi-1e-9)) { cout<<"FAIL: level-1 Im doesn't enclose true range"<<endl; ok=false; }
+	if(!(l1Lo>=l0Lo-1e-9 && l1Hi<=l0Hi+1e-9)) { cout<<"FAIL: level-1 Re box is not a subset of level-0's"<<endl; ok=false; }
+	if(!(i1Lo>=i0Lo-1e-9 && i1Hi<=i0Hi+1e-9)) { cout<<"FAIL: level-1 Im box is not a subset of level-0's"<<endl; ok=false; }
+	cout<<(ok?"ALL CHECKS PASSED":"CHECKS FAILED")<<endl;
+}
+
+void compute_bernstein_bounds(T& t, Simplex(T,2) tri) {
+	extra_data<2>* d=attr(t,tri);
+	if(d->bernstein_computed) return;
+	d->bernstein_computed=true;
+
+	vgtl::array<Vertex(T),3> vs;
+	vertices(t,tri,vs);
+	pt3 p[3]; for(int k=0;k<3;++k) p[k]=point(t,vs[k]);
+
+	int chart=pick_chart(p);
+	cpt Q0,Q1,Q2;
+	dehomogenize(chart,p[0],Q0.a,Q0.b);
+	dehomogenize(chart,p[1],Q1.a,Q1.b);
+	dehomogenize(chart,p[2],Q2.a,Q2.b);
+
+	bernstein_bounds_recursive(g_F,chart,Q0,Q1,Q2,g_bernstein_level,
+															 d->reLo,d->reHi,d->imLo,d->imHi);
+}
+
+bool triangle_maybe_zero(T& t, Simplex(T,2) tri) {
+	compute_bernstein_bounds(t,tri);
+	const extra_data<2>* d=attr(t,tri);
+	return d->reLo<=0 && d->reHi>=0 && d->imLo<=0 && d->imHi>=0;
+}
+
+// Priority for --bernstein mode: the widest candidate-face box (the
+// face least converged so far), or -1 (a sentinel meaning "certified
+// empty -- drop this cell, never refine it again") if none of the
+// cell's 10 triangular faces can contain a zero.
+long g_bernstein_pruned_faces=0; // diagnostic: triangles Newton never had to touch
+
+// Shared with cell_priority above (--proximity): diam/(mind+diam),
+// mind=min over the cell's own vertices of |F(v)|/|gradF(v)|, diam=the
+// cell's own Fubini-Study diameter. For --bernstein the hard hard prune
+// above already rules out cells that can't contain a zero at all --
+// what's missing is a way to rank the survivors, since box-width alone
+// doesn't distinguish "wide because genuinely close to a fast-varying
+// part of the curve" from "wide because this triangle is still large
+// and the enclosure hasn't tightened yet". Reapplying the same
+// proximity signal used for gradient dispersion is a second, cheap
+// (already-cached per-vertex Fx/Fy/Fz/Fval) estimate of the latter, to
+// bias the *ordering* among certified candidates toward the ones
+// nearest the curve, on top of the hard prune (which is unaffected --
+// this only ever scales an already-positive box-width priority).
+double cell_diam(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
+	pt3 pts[DIM+1];
+	for(int i=0;i<=DIM;++i) pts[i]=attr(t,vs[i])->p;
+	double diam=0;
+	for(int i=0;i<=DIM;++i)
+		for(int j=i+1;j<=DIM;++j)
+			diam=std::max(diam,fs_dist(pts[i],pts[j]));
+	return diam;
+}
+
+double proximity_factor(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
+	double mind=1e300;
+	for(int i=0;i<=DIM;++i) {
+		const extra_data<0>* d=attr(t,vs[i]);
+		pt3 g; g[0]=d->Fx; g[1]=d->Fy; g[2]=d->Fz;
+		double gn=hnorm(g);
+		if(gn<1e-12) continue;
+		double dv=std::abs(d->Fval)/gn;
+		if(dv<mind) mind=dv;
+	}
+	double diam=cell_diam(t,vs);
+	return diam/(mind+diam);
+}
+
+// Raw box width isn't comparable across levels: for a smooth curve it
+// shrinks roughly LINEARLY with the cell's own diameter (first-order
+// Taylor behavior), so comparing it against one fixed --threshold
+// conflates "hasn't shrunk yet because the cell is still large" with
+// "genuinely needs more refinement". Dividing by the cell's own
+// diameter removes that size-dependent part, leaving a quantity on a
+// consistent scale (units of Re/Im per unit Fubini-Study distance,
+// i.e. a rate) regardless of level -- the same reasoning --proximity
+// already used (comparing a length to the cell's own diameter) applied
+// here to the box itself rather than to a separate distance estimate.
+double cell_priority_bernstein(T& t, Cell(T) cv) {
+	double best=-1.0;
+	for(int j=0;j<=DIM;++j) {
+		Simplex(T,3) tet=face_op(t,cv,j);
+		for(int k=0;k<=3;++k) {
+			Simplex(T,2) tri=face_op(t,tet,k);
+			if(triangle_maybe_zero(t,tri)) {
+				const extra_data<2>* d=attr(t,tri);
+				double w=(d->reHi-d->reLo)+(d->imHi-d->imLo);
+				if(w>best) best=w;
+			}
+		}
+	}
+	if(best>=0) {
+		vgtl::array<Vertex(T),DIM+1> vs;
+		vertices(t,cv,vs);
+		double diam=cell_diam(t,vs);
+		if(diam>1e-12) best/=diam;
+		if(g_proximity) best*=proximity_factor(t,vs);
+	}
+	return best;
+}
+
 // --- Per-triangle local frame + Newton solve, unchanged from
 // examples/top/riemann/riemann.cpp (see there for the full derivation
 // comments) -- entirely generic in terms of "2 complex ambient
@@ -569,15 +931,16 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 	if(d->computed) return;
 	d->computed=true;
 
+	if(g_bernstein && !triangle_maybe_zero(t,tri)) {
+		++g_bernstein_pruned_faces; // certified empty: Newton never had to run here
+		return;
+	}
+
 	vgtl::array<Vertex(T),3> vs;
 	vertices(t,tri,vs);
 	pt3 p[3]; for(int k=0;k<3;++k) p[k]=point(t,vs[k]);
 
-	int chart=0; double bestscore=-1;
-	for(int c=0;c<3;++c) {
-		double m=std::min(std::abs(p[0][c]), std::min(std::abs(p[1][c]),std::abs(p[2][c])));
-		if(m>bestscore) { bestscore=m; chart=c; }
-	}
+	int chart=pick_chart(p); // same rule compute_bernstein_bounds uses -- see pick_chart
 
 	cx w0,w1,w2,z0,z1,z2;
 	dehomogenize(chart,p[0],w0,z0);
@@ -787,6 +1150,12 @@ int main(int argc, char* argv[]) {
 			g_generic=true;
 		} else if(arg=="--generic-seed" && i+1<argc) {
 			g_generic=true; g_generic_seed=(unsigned)atoi(argv[++i]);
+		} else if(arg=="--bernstein") {
+			g_bernstein=true;
+		} else if(arg=="--bernstein-level" && i+1<argc) {
+			g_bernstein=true; g_bernstein_level=atoi(argv[++i]);
+		} else if(arg=="--bernstein-selftest") {
+			g_bernstein_selftest=true;
 		} else if(arg=="--list-functions") {
 			cout<<"available functions:"<<endl;
 			print_function_catalog_pc2(cout);
@@ -795,7 +1164,8 @@ int main(int argc, char* argv[]) {
 			cerr<<"unrecognized argument: "<<arg<<endl;
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] "
 					<<"[--cutoff X] [--onion] [--onion-scale X] [--proximity] "
-					<<"[--generic] [--generic-seed N] [--list-functions]"<<endl;
+					<<"[--generic] [--generic-seed N] [--bernstein] [--bernstein-level N] "
+					<<"[--list-functions]"<<endl;
 			return 1;
 		}
 	}
@@ -807,12 +1177,20 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	set_curve(catalog[function_index].F);
+
+	if(g_bernstein_selftest) {
+		bernstein_selftest();
+		return 0;
+	}
+
 	cout<<"function: "<<function_index<<" ("<<catalog[function_index].name<<") -- "
 			<<catalog[function_index].description<<endl;
 	cout<<"degree: "<<g_d<<"  max_depth="<<max_depth<<" threshold="<<threshold
 			<<"  proximity="<<(g_proximity?"on":"off")
 			<<"  generic="<<(g_generic?"on":"off");
 	if(g_generic) cout<<" (seed="<<g_generic_seed<<")";
+	cout<<"  bernstein="<<(g_bernstein?"on":"off");
+	if(g_bernstein) cout<<" (level="<<g_bernstein_level<<")";
 	cout<<endl;
 	cout<<"projection: "<<(g_onion?"onion":"flat");
 	if(g_onion) cout<<" (scale="<<g_onion_scale<<")";
@@ -864,14 +1242,21 @@ int main(int argc, char* argv[]) {
 	reorient_via_bfs(t,n4);
 	cout<<"incoherent facets after BFS re-derivation: "<<count_incoherent(t)<<" (expected 0)"<<endl;
 
-	// --- Phase 2: adaptive refinement (gradient-dispersion cell_priority) --
+	// --- Phase 2: adaptive refinement (gradient-dispersion cell_priority,
+	// or --bernstein's certified enclosure test -- see cell_priority vs
+	// cell_priority_bernstein above) --
 	cout<<endl<<"--- adaptive refinement ---"<<endl;
 
 	priority_queue<pair<double,Cell(T)> > pq;
+	int ndropped=0;
 	{
 		Cell_it(T) ci,cend;
-		for(simplices(t,ci,cend); ci!=cend; ++ci)
-			if(is_current(t,*ci)) pq.push(make_pair(cell_priority(t,*ci),*ci));
+		for(simplices(t,ci,cend); ci!=cend; ++ci) {
+			if(!is_current(t,*ci)) continue;
+			double p=g_bernstein ? cell_priority_bernstein(t,*ci) : cell_priority(t,*ci);
+			if(g_bernstein && p<0) { ++ndropped; continue; } // certified empty
+			pq.push(make_pair(p,*ci));
+		}
 	}
 
 	int nsubdivisions=0;
@@ -884,10 +1269,15 @@ int main(int argc, char* argv[]) {
 		refine_app app;
 		maubach_subdivide(t,cv,app);
 		++nsubdivisions;
-		for(size_t i=0;i<app.new_cells.size();++i)
-			pq.push(make_pair(cell_priority(t,app.new_cells[i]),app.new_cells[i]));
+		for(size_t i=0;i<app.new_cells.size();++i) {
+			Cell(T) nc=app.new_cells[i];
+			double p=g_bernstein ? cell_priority_bernstein(t,nc) : cell_priority(t,nc);
+			if(g_bernstein && p<0) { ++ndropped; continue; }
+			pq.push(make_pair(p,nc));
+		}
 	}
 	cout<<"subdivisions performed: "<<nsubdivisions<<endl;
+	if(g_bernstein) cout<<"cells certified empty (dropped, never refined): "<<ndropped<<endl;
 
 	int n42=0;
 	{ Cell_it(T) i,end; for(simplices(t,i,end); i!=end; ++i) if(is_current(t,*i)) ++n42; }
@@ -1016,6 +1406,8 @@ int main(int argc, char* argv[]) {
 	cout<<"touching tetrahedra: "<<ntouching_tets<<"  unhandled node count: "<<nbad_tets<<endl;
 	cout<<"wrote "<<obj_path<<": "<<obj.nverts<<" vertices, "<<obj.nfaces<<" faces"<<endl;
 	if(obj.nclipped) cout<<"polygons dropped by --cutoff: "<<obj.nclipped<<endl;
+	if(g_bernstein) cout<<"triangles Bernstein-pruned (Newton skipped, certified no root): "
+			<<g_bernstein_pruned_faces<<endl;
 
 	// --- Solution-error statistics: |F| residual and the scale-invariant
 	// geometric estimate |F|/|dF/d(x,y)| (see newton_on_triangle) over
