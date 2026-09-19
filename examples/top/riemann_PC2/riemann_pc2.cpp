@@ -10,6 +10,7 @@
 #include <cmath>
 #include <functional>
 #include <random>
+#include <limits>
 #include <vgtl/top/model/nmt.hpp>
 #include <vgtl/utl/array_cons.hpp>
 #include <vgtl/top/add_simplex.hpp>
@@ -47,12 +48,18 @@ namespace vgtl {
 
 	template <>
 	struct extra_data<0> {
+		// Gradient/F(p) used to live here too (cx Fx,Fy,Fz,Fval), cached
+		// once at vertex creation. But cell_priority()/proximity_factor()
+		// (the only readers) are each called exactly once per CELL, at
+		// push time into the refinement priority queue -- never
+		// recomputed on pop -- so caching per VERTEX instead only pays
+		// off if a vertex's average cell-incidence is below the
+		// gradient's own recompute cost, which it isn't here (F is a low-
+		// degree polynomial, eval_poly3 is cheap). Recomputing on demand
+		// (see vertex_gradient()/vertex_Fval() below) trades a bit of
+		// redundant polynomial evaluation for dropping this struct from
+		// 112 to 48 bytes/vertex.
 		pt3 p;           // homogeneous point, kept unit-normalized in C^3
-		cx Fx,Fy,Fz;      // cached gradient of F at p, used directly by
-		                  // cell_priority() below (gradient dispersion) --
-		                  // no per-vertex scalar priority needed any more.
-		cx Fval;          // cached F(p) itself -- used by cell_priority's
-		                  // proximity-to-curve weighting (see there).
 	};
 
 	pt3 point(const T& t, Vertex(T) v) { return attr(t,v)->p; }
@@ -64,8 +71,10 @@ namespace vgtl {
 	// homogeneous point per root now (not a separate w/z pair).
 	template <>
 	struct extra_data<2> {
-		bool computed;
-		int nroots;
+		// Members ordered largest-alignment-first (pt3/double @8-byte
+		// align, then float @4-byte, then the byte-sized flags last) so
+		// the compiler needs no interior padding -- only trailing padding
+		// up to the struct's own (8-byte) alignment requirement.
 		pt3 pt[2];
 		double l1[2], l2[2];
 		// --proximity/--bernstein (see compute_bernstein_bounds): a
@@ -73,9 +82,22 @@ namespace vgtl {
 		// 2-simplex, from its Bernstein-Bezier coefficients -- immutable
 		// once the triangle's 3 vertices exist, cached the same way the
 		// Newton roots above are.
-		bool bernstein_computed;
-		double reLo,reHi,imLo,imHi;
-		extra_data() : computed(false), nroots(0), bernstein_computed(false) {}
+		//
+		// float, not double: this is a certified enclosure used only for
+		// pruning/priority, never fed back into the geometry, so halving
+		// its footprint (the field that dominates the per-triangle memory
+		// budget at deep --bernstein refinement) is a clean win as long as
+		// the stored interval still contains the double-precision one --
+		// see the outward rounding in compute_bernstein_bounds() below.
+		float reLo,reHi,imLo,imHi;
+		// unsigned char, not bool/int: nroots is always 0..2 (see comment
+		// above), and grouping the three 1-byte flags here (after every
+		// 4/8-byte-aligned member) means they cost only their own 3 bytes
+		// instead of also forcing padding around themselves.
+		unsigned char computed;
+		unsigned char nroots;
+		unsigned char bernstein_computed;
+		extra_data() : computed(0), nroots(0), bernstein_computed(0) {}
 	};
 
 }
@@ -180,13 +202,21 @@ void set_curve(const poly_F3& F) {
 	g_Fx=diff_poly3(F,0); g_Fy=diff_poly3(F,1); g_Fz=diff_poly3(F,2);
 }
 
-void compute_vertex_data(T& t, Vertex(T) v) {
+// On-demand replacements for the per-vertex Fx/Fy/Fz/Fval cache: same
+// eval_poly3 calls, just done at cell_priority/proximity_factor time
+// (each vertex is looked at only a handful of times per call, and each
+// call happens only once per cell -- see the extra_data<0> comment).
+pt3 vertex_gradient(const T& t, Vertex(T) v) {
 	pt3 p=point(t,v);
-	cx X=p[0],Y=p[1],Z=p[2];
-	attr(t,v)->Fx=eval_poly3(g_Fx,X,Y,Z);
-	attr(t,v)->Fy=eval_poly3(g_Fy,X,Y,Z);
-	attr(t,v)->Fz=eval_poly3(g_Fz,X,Y,Z);
-	attr(t,v)->Fval=eval_poly3(g_F,X,Y,Z);
+	pt3 g;
+	g[0]=eval_poly3(g_Fx,p[0],p[1],p[2]);
+	g[1]=eval_poly3(g_Fy,p[0],p[1],p[2]);
+	g[2]=eval_poly3(g_Fz,p[0],p[1],p[2]);
+	return g;
+}
+cx vertex_Fval(const T& t, Vertex(T) v) {
+	pt3 p=point(t,v);
+	return eval_poly3(g_F,p[0],p[1],p[2]);
 }
 
 // --- Seed: the 9 Hesse-configuration points (the 9 inflection points
@@ -331,7 +361,6 @@ struct bary_app : do_nothing {
 		for(int i=0;i<=(int)k;++i) pts.push_back(point(t,vs[i]));
 		Vertex(T) v=add(t);
 		point_set(t,v,fs_barycenter(pts));
-		compute_vertex_data(t,v);
 		return v;
 	}
 };
@@ -349,7 +378,6 @@ struct refine_app : do_nothing {
 		vector<pt3> pts(2);
 		pts[0]=point(t,vs[0]); pts[1]=point(t,vs[1]);
 		point_set(t,v,fs_barycenter(pts));
-		compute_vertex_data(t,v);
 		return v;
 	}
 
@@ -411,13 +439,12 @@ double cell_priority(const T& t, Cell(T) cv) {
 	int n=0;
 	double mind=1e300;
 	for(int i=0;i<=DIM;++i) {
-		const extra_data<0>* d=attr(t,vs[i]);
-		pts[i]=d->p;
-		pt3 g; g[0]=d->Fx; g[1]=d->Fy; g[2]=d->Fz;
+		pts[i]=point(t,vs[i]);
+		pt3 g=vertex_gradient(t,vs[i]);
 		double gn=hnorm(g);
 		if(gn<1e-12) continue; // near a singular point (F, gradient both ~0): can't normalize
 		if(g_proximity) {
-			double dv=std::abs(d->Fval)/gn;
+			double dv=std::abs(vertex_Fval(t,vs[i]))/gn;
 			if(dv<mind) mind=dv;
 		}
 		for(int c=0;c<3;++c) g[c]/=gn;
@@ -709,8 +736,19 @@ void compute_bernstein_bounds(T& t, Simplex(T,2) tri) {
 	dehomogenize(chart,p[1],Q1.a,Q1.b);
 	dehomogenize(chart,p[2],Q2.a,Q2.b);
 
+	// Recursion stays double for numerical stability; only the final,
+	// immutable, cached result is narrowed to float. Round outward (one
+	// float ULP via nextafterf) so the stored box is still a superset of
+	// the double-precision enclosure -- the certified-enclosure property
+	// (used by triangle_maybe_zero's pruning test) is preserved exactly,
+	// not just approximately.
+	double reLo,reHi,imLo,imHi;
 	bernstein_bounds_recursive(g_F,chart,Q0,Q1,Q2,g_bernstein_level,
-															 d->reLo,d->reHi,d->imLo,d->imHi);
+															 reLo,reHi,imLo,imHi);
+	d->reLo=nextafterf((float)reLo,-numeric_limits<float>::infinity());
+	d->reHi=nextafterf((float)reHi, numeric_limits<float>::infinity());
+	d->imLo=nextafterf((float)imLo,-numeric_limits<float>::infinity());
+	d->imHi=nextafterf((float)imHi, numeric_limits<float>::infinity());
 }
 
 bool triangle_maybe_zero(T& t, Simplex(T,2) tri) {
@@ -751,11 +789,10 @@ double cell_diam(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
 double proximity_factor(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
 	double mind=1e300;
 	for(int i=0;i<=DIM;++i) {
-		const extra_data<0>* d=attr(t,vs[i]);
-		pt3 g; g[0]=d->Fx; g[1]=d->Fy; g[2]=d->Fz;
+		pt3 g=vertex_gradient(t,vs[i]);
 		double gn=hnorm(g);
 		if(gn<1e-12) continue;
-		double dv=std::abs(d->Fval)/gn;
+		double dv=std::abs(vertex_Fval(t,vs[i]))/gn;
 		if(dv<mind) mind=dv;
 	}
 	double diam=cell_diam(t,vs);
@@ -1235,7 +1272,6 @@ int main(int argc, char* argv[]) {
 	for(int i=0;i<9;++i) {
 		V[i]=add(t);
 		point_set(t,V[i],hesse[i]);
-		compute_vertex_data(t,V[i]);
 	}
 	vector<cell5> kc=kuhnel_cells();
 	cout<<"Kuhnel base cells: "<<kc.size()<<" (expected 36)"<<endl;
