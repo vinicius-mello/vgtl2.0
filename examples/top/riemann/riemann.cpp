@@ -1039,12 +1039,30 @@ int main(int argc, char* argv[]) {
 	}
 
 	if(g_generic_coords) {
-		// Affine transform on F itself: fixed, unrelated to the seed
-		// (moves finite landmark points around; see the comment above
-		// GA/GB/GC/GD -- an affine map always fixes infinity, which is
-		// why the seed-vertex rotation below exists as a separate fix).
-		GA=std::polar(1.0,0.7); GB=cx(0.13,0.29);
-		GC=std::polar(1.0,1.1); GD=cx(-0.21,0.17);
+		// GA/GB/GC/GD (the affine transform ON F, see the comment above
+		// their declaration) is deliberately left at the identity here --
+		// NOT set to a fixed nonzero offset the way it used to be. Reason:
+		// it and the rotation below were two separate mechanisms for the
+		// same underlying purpose (break the seed mesh's alignment with
+		// the curve), added at different times, and only the rotation
+		// can reach the w=infty/z=infty vertices (an affine map always
+		// fixes infinity). Once the rotation existed, it ALSO already
+		// moves every finite landmark (0,1,-1,i,-i) -- not just the
+		// poles -- making the affine transform redundant for its
+		// original purpose. Confirmed empirically, not just argued:
+		// parabola, --depth 10, 4 seeds, rotation-only vs rotation+affine
+		// gave statistically indistinguishable bad-cell rates (both
+		// ~0.1-1.2%, both >10x better than no --generic at all; neither
+		// consistently beat the other across seeds). So this is now done
+		// exactly the way examples/top/riemann_PC2/riemann_pc2.cpp does
+		// it: ONE mesh-vertex-position transform, not a wrapper re-run on
+		// every F evaluation. GA/GB/GC/GD and everything built on them
+		// (to_wr/to_zr, onion_other_root) are kept, not deleted -- they
+		// already degrade correctly to the plain GA=1,GB=0 formulas at
+		// this identity default (that generality was real debugging work,
+		// see the comments at to_wr/onion_other_root), and repurposing
+		// GA/GB/GC/GD for something else later remains possible.
+
 		// Random, seed-controlled rotation of the seed octahedron itself
 		// (independent draws for w and z -- two draws from the same
 		// stream, so they generically differ, unlike a shared rotation
