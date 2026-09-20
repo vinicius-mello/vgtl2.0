@@ -1148,16 +1148,14 @@ same_crossing_node(const crossing_node& a, const crossing_node& b) {
 //   is dropped.
 //
 // - onion: a direct CP^2 analogue of examples/top/riemann's onion mode.
-//   Direction on S^2 comes from to_sphere() applied to ONE of the
-//   polygon's own dehomogenized chart coordinates (the same (a,b) flat
-//   mode uses, from the SAME per-polygon chart -- see pick_chart_polygon
-//   below), and the bump is the modulus of the OTHER one. Both (a,b) are
-//   true functions of the point in CP^2 (ratios of homogeneous
-//   coordinates), not of whichever arbitrary unit-norm representative
-//   happens to be stored for it -- essential, see the two bugs below,
-//   both found and fixed the same session (first one by the user
-//   re-looking at a Blender render, the second by the user recognizing
-//   the SHAPE of the first fix's remaining symptom).
+//   Direction on S^2 comes from to_sphere(Z/X) (a FIXED ratio, not an
+//   adaptively-picked chart -- see BUG 3 below for why that distinction
+//   matters), and the bump is |Y|. This went through 3 rounds of real
+//   bugs, each found by the user looking at the actual Blender render
+//   (bugs 1 and 3) or by recognizing the shape of a fix's remaining
+//   symptom (bug 2) -- see project_for_viz() below for the final,
+//   working version and its own comment; kept here only as the class-
+//   level summary of what was wrong each time.
 //
 //   BUG 1, FIXED: an earlier version fed the raw homogeneous Z (bounded,
 //   |Z|<=1, since the representative is kept unit-normalized) directly
@@ -1179,19 +1177,19 @@ same_crossing_node(const crossing_node& a, const crossing_node& b) {
 //   doesn't cancel that phase, so zeta itself rotates by theta as theta
 //   varies -- confirmed numerically (a Python check: same point, 5
 //   different representative phases, 5 different to_sphere() outputs,
-//   rotating around the vertical axis exactly as theta did). Different
-//   crossing-node computations landing on different representative
-//   phases for what's geometrically the same point then plot it in
-//   different places, which is what "only one hemisphere renders
-//   correctly, the rest collapses" looks like in practice (inconsistent,
-//   representative-dependent placement, not a clean hemisphere cutoff).
-//   Fixed by using an honest CHART RATIO instead (dehomogenize's own a,b
-//   -- Y/X & Z/X in chart 0, etc.): dividing complex by complex cancels
-//   any common phase exactly, so a,b are true functions of the point,
-//   confirmed by the same numerical check (5 phases, 1 identical
-//   output). pick_chart_polygon (already used by flat mode, to avoid
-//   stitching a polygon's vertices in inconsistent per-point charts) is
-//   now used for onion too, instead of onion hardcoding chart 0.
+//   rotating around the vertical axis exactly as theta did).
+//
+//   BUG 3, FIXED (the user again: "de novo só vemos um hemisfério" after
+//   bug 2's fix): switching to dehomogenize's chart ratio (a,b), from
+//   pick_chart_polygon's BEST-CONDITIONED chart, fixed phase-invariance
+//   but silently reintroduced bug 1's disease through a new mechanism --
+//   "best conditioned" means the pivot is the LARGEST-magnitude
+//   coordinate, which by construction forces every non-pivot ratio to
+//   satisfy |ratio|<=1, capping to_sphere's z-component at 0 again
+//   (confirmed: 20000 random unit-normalized points, max z reached was
+//   ~-9e-5). "Well-conditioned" and "spans the whole sphere" are
+//   directly at odds for the same quantity. Fixed by dropping the
+//   adaptive chart choice for direction entirely -- see project_for_viz.
 double g_cutoff=1e300;
 bool g_onion=false;
 double g_onion_scale=0.5;
@@ -1232,24 +1230,43 @@ int pick_chart_polygon(const vector<crossing_node>& nodes, const vector<int>& cy
 }
 
 vec<3,double> project_for_viz(const pt3& p, int chart) {
-	cx a,b; dehomogenize(chart,p,a,b);
 	if(g_onion) {
-		// a,b are true functions of the CP^2 point (ratios of homogeneous
-		// coordinates, phase-invariant) -- see the class comment above for
-		// why that matters and why the raw homogeneous Z didn't work,
-		// twice over. Direction from 'a' (to_sphere needs a genuinely
-		// unbounded input, which a chart ratio actually is), bump from
-		// |b| (bounded by sqrt(2): 'chart' is picked so its own pivot
-		// coordinate is the largest of the 3, so both a,b have modulus
-		// <=sqrt(2) -- same bound the old |X|+|Y| formula had, no extra
-		// clamping needed here either).
-		vec<3,double> dir=to_sphere(a);
-		double bump=std::abs(b);
+		// FOUND AND FIXED A THIRD TIME (same session, user again: "de novo
+		// só vemos um hemisfério"): the previous version used 'a' from
+		// pick_chart_polygon's own BEST-CONDITIONED chart -- but "best
+		// conditioned" means the pivot is picked to be the LARGEST-
+		// magnitude of the 3 homogeneous coordinates, which by definition
+		// forces every non-pivot ratio (a and b both) to satisfy
+		// |ratio|<=1. Since to_sphere's z-component is (|w|^2-1)/(|w|^2+1),
+		// |a|<=1 caps it at 0 -- confirmed by a 20000-sample random check:
+		// max z ever reached was ~-9e-5, i.e. never above the equator.
+		// Fixing phase-invariance (the previous bug) by switching to a
+		// chart ratio accidentally reintroduced Bug 1's disease (bounded
+		// input into to_sphere's unbounded-domain formula) through a new
+		// mechanism: "well-conditioned" and "spans the whole sphere" are
+		// DIRECTLY AT ODDS for the same quantity, since a well-conditioned
+		// ratio is by construction bounded away from both 0 and infinity.
+		//
+		// Fix: stop adaptively picking the "best" chart for direction at
+		// all -- use one FIXED ratio, Z/X, unconditionally (matching this
+		// mode's original intent: an arbitrary but fixed choice, uniform
+		// across every curve, not adaptive per-polygon conditioning).
+		// Still phase-invariant (dividing complex by complex, confirmed
+		// numerically the same way as the chart-ratio fix), and genuinely
+		// unbounded -- Z/X legitimately grows large wherever the curve
+		// passes near the line X=0, reaching the north pole there instead
+		// of being structurally forbidden from it. Bump is |Y|, the one
+		// homogeneous coordinate not already spent on direction (bounded
+		// by 1 trivially, from |X|^2+|Y|^2+|Z|^2=1 -- no clamping needed).
+		cx zeta = (std::abs(p[0])>1e-9) ? (p[2]/p[0]) : (p[2]*1e8);
+		vec<3,double> dir=to_sphere(zeta);
+		double bump=std::abs(p[1]);
 		double r=1.0+g_onion_scale*bump;
 		vec<3,double> out;
 		for(int i=0;i<3;++i) out[i]=r*dir[i];
 		return out;
 	}
+	cx a,b; dehomogenize(chart,p,a,b);
 	vec<3,double> r;
 	r[0]=a.real(); r[1]=a.imag(); r[2]=b.real();
 	return r;
@@ -1261,7 +1278,7 @@ struct obj_writer {
 	obj_writer(const char* path) : out(path), nverts(0), nfaces(0), nclipped(0) {
 		if(g_onion)
 			out<<"# Riemann surface (CP^2 approach) extraction, onion projection: "
-					<<"direction=chart coord 'a' on S^2, radius=1+"<<g_onion_scale<<"*|b|\n";
+					<<"direction=Z/X on S^2, radius=1+"<<g_onion_scale<<"*|Y|\n";
 		else
 			out<<"# Riemann surface (CP^2 approach) extraction, projected via "
 					<<"per-point best affine chart (Re a, Im a, Re b)\n";
@@ -1269,7 +1286,7 @@ struct obj_writer {
 			out<<"# cutoff: polygons with a vertex farther than "<<g_cutoff<<" from the origin dropped\n";
 	}
 	void write_polygon(const vector<crossing_node>& nodes, const vector<int>& cyc) {
-		int chart=pick_chart_polygon(nodes,cyc); // one chart for the whole polygon, both projections
+		int chart=g_onion ? 0 : pick_chart_polygon(nodes,cyc); // onion no longer uses chart at all (fixed Z/X ratio, see project_for_viz)
 		vector<vec<3,double> > pts(cyc.size());
 		for(size_t i=0;i<cyc.size();++i) pts[i]=project_for_viz(nodes[cyc[i]].p,chart);
 		if(!g_onion) {
