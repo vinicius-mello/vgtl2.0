@@ -1158,11 +1158,32 @@ same_crossing_node(const crossing_node& a, const crossing_node& b) {
 //   choice, uniform across every curve in the catalog, unlike picking
 //   "z" would have been before this project's whole point of dropping
 //   distinguished directions) is stereographically projected to a
-//   direction on S^2 via the same to_sphere() formula as before, and the
-//   bump is |X|+|Y| -- the sum of the moduli of the OTHER two
-//   homogeneous coordinates. Because every point is kept unit-normalized
-//   (|X|^2+|Y|^2+|Z|^2=1), |X|+|Y| is automatically bounded (<=sqrt(2)),
-//   so the bump stays well-behaved with no extra clamping.
+//   direction on S^2, and the bump is |X|+|Y| -- the sum of the moduli
+//   of the OTHER two homogeneous coordinates. Because every point is
+//   kept unit-normalized (|X|^2+|Y|^2+|Z|^2=1), |X|+|Y| is automatically
+//   bounded (<=sqrt(2)), so the bump stays well-behaved with no extra
+//   clamping.
+//
+//   FOUND AND FIXED (user reported "onion parece quebrada" -- confirmed
+//   by direct measurement, not just visually): feeding Z itself into
+//   to_sphere() -- as the comment used to say, "the same to_sphere()
+//   formula as before" -- is wrong, because to_sphere() is inverse
+//   stereographic projection FROM AN UNBOUNDED affine coordinate (as
+//   examples/top/riemann actually uses it, on the unbounded chart value
+//   z=from_sphere(...)), and Z here is bounded (|Z|<=1, since the
+//   representative is unit-normalized). Feeding a bounded input in
+//   means n=|Z|^2 only ever reaches [0,1], so to_sphere's own
+//   p[2]=(n-1)/(n+1) is confined to [-1,0] -- the WHOLE mesh collapses
+//   onto the closed southern hemisphere, never the northern one.
+//   Measured directly: every single exported onion vertex had its 3rd
+//   OBJ coordinate in [-0.999,0], zero exceptions, across the full
+//   elliptic-curve mesh. Fixed by feeding to_sphere() a genuinely
+//   unbounded quantity instead: zeta = Z/sqrt(|X|^2+|Y|^2) -- finite
+//   (0) exactly where Z=0 (south pole, unchanged), and |zeta|->infinity
+//   exactly as the point approaches [0:0:1] (X,Y->0), reaching the
+//   north pole there -- a genuine bijection from the whole unit disk
+//   |Z|<=1 onto the whole sphere, matching to_sphere()'s actual domain
+//   instead of only ever exercising half of its range.
 double g_cutoff=1e300;
 bool g_onion=false;
 double g_onion_scale=0.5;
@@ -1204,7 +1225,11 @@ int pick_chart_polygon(const vector<crossing_node>& nodes, const vector<int>& cy
 
 vec<3,double> project_for_viz(const pt3& p, int chart) {
 	if(g_onion) {
-		vec<3,double> dir=to_sphere(p[2]); // Z: direction on S^2
+		// zeta, not Z itself -- see the class comment above for why
+		// to_sphere(Z) alone only ever reaches the southern hemisphere.
+		double R=std::sqrt(std::norm(p[0])+std::norm(p[1]));
+		cx zeta = (R>1e-12) ? (p[2]/R) : (p[2]*1e8); // R~0: practically at [0:0:1], the north pole
+		vec<3,double> dir=to_sphere(zeta);
 		double bump=std::abs(p[0])+std::abs(p[1]); // |X|+|Y|: radial displacement
 		double r=1.0+g_onion_scale*bump;
 		vec<3,double> out;
