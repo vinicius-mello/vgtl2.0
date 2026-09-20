@@ -17,19 +17,20 @@
 #include <vgtl/top/euler.hpp>
 #include <vgtl/top/pm.hpp>
 #include <vgtl/top/maubach.hpp>
-#include <vgtl/top/barycentric.hpp>
 #include <vgtl/top/do_nothing.hpp>
 #include <vgtl/alg/vec.hpp>
 #include "functions_pc2.hpp"
 
-// Seed mesh: one barycentric subdivision of Kuhnel's 9-vertex minimal
-// triangulation of CP^2 (verified Maubach-compatible and orientable --
-// see examples/top/riemann_PC2/find_reordering.cpp and
-// barycentric_test.cpp for the proofs this relies on). Unlike
-// examples/top/riemann/ (built on C_infty x C_infty = P^1 x P^1, w and z
-// treated as two separate factors with all the asymmetric-pole handling
-// that entailed), everything here lives in a single CP^2: one
-// homogeneous point [X:Y:Z] per vertex, one curve F(X,Y,Z)=0.
+// Seed mesh: A. Gaifullin's 15-vertex/108-cell triangulation of CP^2
+// (arXiv:0904.4222, also GAP simpcomp SCLib entry 397) -- Maubach-
+// compatible and coherently orientable DIRECTLY, no subdivision step
+// (see gaifullin_points()/gaifullin_cells() below for the full story,
+// including why this replaced the project's earlier Kuhnel-9-vertex +
+// barycentric-subdivision seed). Unlike examples/top/riemann/ (built on
+// C_infty x C_infty = P^1 x P^1, w and z treated as two separate
+// factors with all the asymmetric-pole handling that entailed),
+// everything here lives in a single CP^2: one homogeneous point
+// [X:Y:Z] per vertex, one curve F(X,Y,Z)=0.
 
 #define DIM 4
 
@@ -185,10 +186,10 @@ pt3 fs_barycenter(const vector<pt3>& pts) {
 // --- Random unitary change of basis on C^3 (--generic), applied to the
 // seed mesh's own vertex positions (NOT to F, which is left exactly as
 // catalogued) to break any alignment between the curve's fixed X,Y,Z
-// basis and the Hesse configuration's own: every one of the 9 seed
-// points has exactly one homogeneous coordinate equal to 0 (see
-// hesse_points() below) -- a real, non-generic resonance with that
-// basis, and everything basis-dependent downstream (Fx,Fy,Fz used by
+// basis and the seed mesh's own: 3 of the 15 seed points (the V4\{e}
+// ones, see gaifullin_points() below) have TWO homogeneous coordinates
+// equal to 0, a real, non-generic resonance with that basis, and
+// everything basis-dependent downstream (Fx,Fy,Fz used by
 // cell_priority, per-triangle chart selection in
 // triangle_intersection) is evaluated in that same fixed basis. This is
 // the direct CP^2 analogue of examples/top/riemann's --generic seed
@@ -252,65 +253,96 @@ cx vertex_Fval(const T& t, Vertex(T) v) {
 	return eval_poly3(g_F,p[0],p[1],p[2]);
 }
 
-// --- Seed: the 9 Hesse-configuration points (the 9 inflection points
-// shared by every cubic in the Hesse pencil X^3+Y^3+Z^3=3*lambda*XYZ),
-// labeled 0..8 exactly as in the (independently verified) facet data
-// below. omega = primitive cube root of unity.
-vector<pt3> hesse_points() {
+// --- Seed: Gaifullin's 15-vertex triangulation X of CP^2 (A. Gaifullin,
+// arXiv:0904.4222, Construction 1.1 + Sec. 3's explicit coordinates;
+// independently cross-checked against GAP's simpcomp SCLib entry 397,
+// "Gaifullin CP^2" -- identical f-vector (15,90,240,270,108) and facet
+// list up to relabeling). REPLACES Kuhnel's 9-vertex/36-cell CP^2_9 +
+// barycentric subdivision used earlier this project: Kuhnel's raw
+// 36-cell complex has a PROVEN bipartiteness obstruction to coherent
+// orientation under any Maubach-compatible reordering (see
+// riemann_pc2_new_approach memory / find_reordering.cpp), forcing the
+// barycentric-subdivision workaround -- which in turn introduced its
+// own bug (3 of the 9 Hesse points are exact vector sums of two others,
+// P[i]+P[6]=P[i+3], so 3 subdivision-created flag-centroids collapse
+// exactly onto existing vertices, producing 48 zero-length-edge cells
+// that Maubach's longest-edge rule can never split). Gaifullin's
+// triangulation's dual graph IS bipartite (verified: BFS 2-coloring,
+// 0 conflicts) and admits a proper 5-edge-coloring (verified: exact
+// backtracking search) -- so it gets BOTH Maubach compatibility AND
+// coherent orientation directly, with no subdivision step and no
+// vertex-coincidence risk (there's no vertex-averaging construction
+// left to coincide). Also directly verified: none of its 240 actual
+// 2-faces are projectively collinear (all 240 determinants nonzero).
+//
+// Vertex set V = (V4\{e}) x-union ({1,2,3,4}x{1,2,3}), V4 the Klein
+// four-group in S4; omega = primitive cube root of unity. Labels 0-2
+// are V4\{e} = (12)(34),(13)(24),(14)(23); labels 3-14 are (a,b) for
+// a=1..4 (4 blocks of 3), b=1..3, in that order -- exactly the order
+// used below and in gaifullin_cells[].
+vector<pt3> gaifullin_points() {
 	double s3=std::sqrt(3.0);
 	cx one(1,0), zero(0,0);
 	cx omega(-0.5, s3/2.0), omega2(-0.5,-s3/2.0);
-	vector<pt3> P(9);
-	P[0]=mkpt(zero, one, -one);
-	P[1]=mkpt(zero, one, -omega);
-	P[2]=mkpt(zero, one, -omega2);
-	P[3]=mkpt(one, zero, -one);
-	P[4]=mkpt(one, zero, -omega);
-	P[5]=mkpt(one, zero, -omega2);
-	P[6]=mkpt(one, -one, zero);
-	P[7]=mkpt(one, -omega, zero);
-	P[8]=mkpt(one, -omega2, zero);
-	for(int i=0;i<9;++i) P[i]=normalize3(P[i]);
+	vector<pt3> P(15);
+	P[0]=mkpt(zero,zero,one);           // (12)(34)
+	P[1]=mkpt(zero,one,zero);           // (13)(24)
+	P[2]=mkpt(one,zero,zero);           // (14)(23)
+	P[3]=mkpt(-one,omega,omega2);       // (1,1)
+	P[4]=mkpt(-one,omega2,omega);       // (1,2)
+	P[5]=mkpt(-one,one,one);            // (1,3)
+	P[6]=mkpt(one,-omega,omega2);       // (2,1)
+	P[7]=mkpt(one,-omega2,omega);       // (2,2)
+	P[8]=mkpt(one,-one,one);            // (2,3)
+	P[9]=mkpt(one,omega,-omega2);       // (3,1)
+	P[10]=mkpt(one,omega2,-omega);      // (3,2)
+	P[11]=mkpt(one,one,-one);           // (3,3)
+	P[12]=mkpt(one,omega,omega2);       // (4,1)
+	P[13]=mkpt(one,omega2,omega);       // (4,2)
+	P[14]=mkpt(one,one,one);            // (4,3)
+	for(int i=0;i<15;++i) P[i]=normalize3(P[i]);
 	if(g_generic) {
 		cx M[3][3]; random_unitary(M,g_generic_seed);
-		for(int i=0;i<9;++i) P[i]=apply_unitary(M,P[i]);
+		for(int i=0;i<15;++i) P[i]=apply_unitary(M,P[i]);
 	}
 	return P;
 }
 
-// --- The 36 four-simplices of Kuhnel's CP^2_9, as 12 orbit
-// representatives under S=(0 3 6)(1 4 7)(2 5 8) (order 3) -- reproduced
-// and verified (facet-sharing {2:90}, vertex-transitive, f-vector
-// (9,36,84,90,36), Euler char 3) in find_reordering.cpp; source is
-// Kuhnel & Banchoff as reproduced in R. E. Schwartz, "Trisecting the
-// 9-vertex complex projective plane" (arXiv:2205.00595), Sec. 4.
+// --- The 108 four-simplices of Gaifullin's triangulation, ALREADY in
+// Maubach-compatible per-cell vertex order (local position = the color
+// a backtracking 5-edge-coloring search assigned to the facet opposite
+// that vertex) -- derived and verified offline (facet-owner histogram
+// {2:270}, 0 same-index mismatches, 0 orientation-coherence violations
+// under the corresponding bipartite 2-coloring). Orientation itself is
+// NOT baked in here: main() just seeds it arbitrarily and calls the
+// same reorient_via_bfs() Kuhnel's seed already used, which re-derives
+// it from this vertex order and (per the above) is guaranteed to find
+// it coherent.
 typedef vgtl::array<int,5> cell5;
-
-int apply_S(int v) { static const int m[9]={3,4,5,6,7,8,0,1,2}; return m[v]; }
-cell5 apply_S(const cell5& c) {
-	cell5 r; for(int i=0;i<5;++i) r[i]=apply_S(c[i]);
-	std::sort(r.begin(),r.end());
-	return r;
-}
-const int base_raw[12][5] = {
-	{0,4,1,7,8}, {0,1,2,7,8}, {0,2,5,7,8}, {3,4,1,7,8}, {3,1,2,7,8}, {3,2,5,7,8},
-	{0,3,1,4,5}, {0,3,2,4,5}, {0,3,1,4,8}, {0,3,2,5,7},
-	{0,3,6,1,5}, {0,3,6,5,7},
+static const int gaifullin_cells_raw[108][5] = {
+	{0,3,7,9,13}, {0,3,7,9,14}, {0,3,7,10,12}, {0,3,7,10,14}, {0,3,7,11,12}, {0,3,7,11,13},
+	{0,3,8,9,13}, {0,3,8,9,14}, {0,3,8,10,12}, {0,3,8,10,14}, {0,3,8,11,12}, {0,3,8,11,13},
+	{0,4,6,9,13}, {0,4,6,9,14}, {0,4,6,10,12}, {0,4,6,10,14}, {0,4,6,11,12}, {0,4,6,11,13},
+	{0,4,8,9,13}, {0,4,8,9,14}, {0,4,8,10,12}, {0,4,8,10,14}, {0,4,8,11,12}, {0,4,8,11,13},
+	{0,5,6,9,13}, {0,5,6,9,14}, {0,5,6,10,12}, {0,5,6,10,14}, {0,5,6,11,12}, {0,5,6,11,13},
+	{0,5,7,9,13}, {0,5,7,9,14}, {0,5,7,10,12}, {0,5,7,10,14}, {0,5,7,11,12}, {0,5,7,11,13},
+	{1,3,6,10,13}, {1,3,6,10,14}, {1,3,6,11,13}, {1,3,6,11,14}, {1,3,7,10,12}, {1,3,7,10,14},
+	{1,3,7,11,12}, {1,3,7,11,14}, {1,3,8,10,12}, {1,3,8,10,13}, {1,3,8,11,12}, {1,3,8,11,13},
+	{1,4,6,9,13}, {1,4,6,9,14}, {1,4,6,11,13}, {1,4,6,11,14}, {1,4,7,9,12}, {1,4,7,9,14},
+	{1,4,7,11,12}, {1,4,7,11,14}, {1,4,8,9,12}, {1,4,8,9,13}, {1,4,8,11,12}, {1,4,8,11,13},
+	{1,5,6,9,13}, {1,5,6,9,14}, {1,5,6,10,13}, {1,5,6,10,14}, {1,5,7,9,12}, {1,5,7,9,14},
+	{1,5,7,10,12}, {1,5,7,10,14}, {1,5,8,9,12}, {1,5,8,9,13}, {1,5,8,10,12}, {1,5,8,10,13},
+	{2,3,6,10,13}, {2,3,6,10,14}, {2,3,6,11,13}, {2,3,6,11,14}, {2,3,7,9,13}, {2,3,7,9,14},
+	{2,3,7,11,13}, {2,3,7,11,14}, {2,3,8,9,13}, {2,3,8,9,14}, {2,3,8,10,13}, {2,3,8,10,14},
+	{2,4,6,10,12}, {2,4,6,10,14}, {2,4,6,11,12}, {2,4,6,11,14}, {2,4,7,9,12}, {2,4,7,9,14},
+	{2,4,7,11,12}, {2,4,7,11,14}, {2,4,8,9,12}, {2,4,8,9,14}, {2,4,8,10,12}, {2,4,8,10,14},
+	{2,5,6,10,12}, {2,5,6,10,13}, {2,5,6,11,12}, {2,5,6,11,13}, {2,5,7,9,12}, {2,5,7,9,13},
+	{2,5,7,11,12}, {2,5,7,11,13}, {2,5,8,9,12}, {2,5,8,9,13}, {2,5,8,10,12}, {2,5,8,10,13},
 };
 
-vector<cell5> kuhnel_cells() {
-	vector<cell5> cells;
-	for(int b=0;b<12;++b) {
-		cell5 c; for(int i=0;i<5;++i) c[i]=base_raw[b][i];
-		std::sort(c.begin(),c.end());
-		cell5 cur=c;
-		for(int step=0; step<3; ++step) {
-			bool dup=false;
-			for(size_t k=0;k<cells.size();++k) if(cells[k]==cur) { dup=true; break; }
-			if(!dup) cells.push_back(cur);
-			cur=apply_S(cur);
-		}
-	}
+vector<cell5> gaifullin_cells() {
+	vector<cell5> cells(108);
+	for(int i=0;i<108;++i) for(int k=0;k<5;++k) cells[i][k]=gaifullin_cells_raw[i][k];
 	return cells;
 }
 
@@ -337,14 +369,13 @@ int count_incoherent(const T& t) {
 }
 
 void reorient_via_bfs(T& t, int ncells) {
-	// Unlike examples/top/riemann/riemann.cpp (where this same BFS ran
-	// right after building the raw seed, when every cell in the container
-	// was current), this runs AFTER barycentric_subdivision -- the
-	// container now also holds the original 36 cells and every
-	// intermediate stellar-subdivision cell, all marked not-current. Must
-	// filter on is_current() when picking the start cell and while
-	// walking, or the BFS leaks into that stale part of the container
-	// (caught exactly this way: it first reached 5021 > 4320 cells).
+	// Byte-for-byte the same BFS as examples/top/riemann/riemann.cpp's,
+	// run here right after seeding the 108 Gaifullin cells (all current
+	// at this point, unlike the earlier Kuhnel-seed pipeline which ran
+	// this AFTER barycentric subdivision, with stale not-current cells
+	// also sitting in the container -- the is_current() filtering below
+	// is kept anyway, harmless and cheap, in case this is ever called
+	// somewhere less pristine).
 	set<Cell(T)> seen;
 	queue<Cell(T)> q;
 	Cell_it(T) ci,cend;
@@ -377,26 +408,9 @@ void reorient_via_bfs(T& t, int ncells) {
 		}
 	}
 	cout<<"orientation BFS reached "<<seen.size()<<"/"<<ncells<<" cells, "
-			<<nconflict<<" conflicts (expected 0 -- proved to exist for this "
-			<<"complex in barycentric_test.cpp)"<<endl;
+			<<nconflict<<" conflicts (expected 0 -- Gaifullin's dual graph is "
+			<<"bipartite, verified offline before this reordering was written)"<<endl;
 }
-
-// --- barycentric_vertex callback for vgtl::barycentric_subdivision:
-// places the new vertex at the Fubini-Study barycenter of the face's
-// own vertices, and caches its gradient/tval like any other vertex.
-struct bary_app : do_nothing {
-	using do_nothing::apply;
-	template <dim_t k>
-	Vertex(T) barycentric_vertex(T& t, Simplex(T,k) s) {
-		vgtl::array<Vertex(T),k+1> vs;
-		vertices(t,s,vs);
-		vector<pt3> pts;
-		for(int i=0;i<=(int)k;++i) pts.push_back(point(t,vs[i]));
-		Vertex(T) v=add(t);
-		point_set(t,v,fs_barycenter(pts));
-		return v;
-	}
-};
 
 // --- Maubach ApplyNew: geodesic (Fubini-Study) midpoint for new edge
 // vertices, exactly as slerp_midpoint did on the real sphere before.
@@ -1311,37 +1325,37 @@ int main(int argc, char* argv[]) {
 	string obj_path_s="riemann_pc2_"+catalog[function_index].name+(g_onion?"_onion":"")+".obj";
 	const char* obj_path=obj_path_s.c_str();
 
-	// --- Phase 1: seed mesh -- Kuhnel's 36-cell CP^2_9, then one
-	// barycentric subdivision (vgtl::barycentric_subdivision).
-	cout<<endl<<"--- seed mesh: Kuhnel CP^2_9 + barycentric subdivision ---"<<endl;
+	// --- Phase 1: seed mesh -- Gaifullin's 15-vertex/108-cell
+	// triangulation of CP^2, already Maubach-compatible and orientable
+	// with no subdivision step (see gaifullin_points()/gaifullin_cells()
+	// above for why this replaced Kuhnel's 9-vertex/36-cell + barycentric
+	// subdivision).
+	cout<<endl<<"--- seed mesh: Gaifullin CP^2_15 ---"<<endl;
 
-	vector<pt3> hesse=hesse_points();
-	vector<Vertex(T)> V(9);
-	for(int i=0;i<9;++i) {
+	vector<pt3> gp=gaifullin_points();
+	vector<Vertex(T)> V(15);
+	for(int i=0;i<15;++i) {
 		V[i]=add(t);
-		point_set(t,V[i],hesse[i]);
+		point_set(t,V[i],gp[i]);
 	}
-	vector<cell5> kc=kuhnel_cells();
-	cout<<"Kuhnel base cells: "<<kc.size()<<" (expected 36)"<<endl;
+	vector<cell5> gc=gaifullin_cells();
+	cout<<"Gaifullin base cells: "<<gc.size()<<" (expected 108)"<<endl;
 	{
 		complex_builder<T> cb(t);
-		for(size_t ci=0; ci<kc.size(); ++ci) {
+		for(size_t ci=0; ci<gc.size(); ++ci) {
 			vgtl::array<Vertex(T),5> vs;
-			for(int k=0;k<5;++k) vs[k]=V[kc[ci][k]];
+			for(int k=0;k<5;++k) vs[k]=V[gc[ci][k]];
 			Cell(T) cv=add(cb,vs);
 			orientation_set(t,cv,+1); // arbitrary seed -- overwritten by the BFS below
 			level_set(t,cv,0);
 		}
 	}
 
-	bary_app bapp;
-	barycentric_subdivision(t,bapp);
-
 	int nv=0,n4=0;
 	{ Vertex_it(T) i,end; for(simplices(t,i,end); i!=end; ++i) if(is_current(t,*i)) ++nv; }
 	{ Cell_it(T) i,end; for(simplices(t,i,end); i!=end; ++i) if(is_current(t,*i)) ++n4; }
-	cout<<"vertices after barycentric subdivision: "<<nv<<" (expected 9+36+... flags -- see below)"<<endl;
-	cout<<"4-simplices after barycentric subdivision: "<<n4<<" (expected 36*120=4320)"<<endl;
+	cout<<"vertices: "<<nv<<" (expected 15)"<<endl;
+	cout<<"4-simplices: "<<n4<<" (expected 108)"<<endl;
 	cout<<"euler characteristic: "<<euler_characteristic(t)<<" (expected 3, = CP^2's)"<<endl;
 
 	int nbnd=0;
