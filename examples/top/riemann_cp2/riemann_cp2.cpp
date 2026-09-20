@@ -1147,43 +1147,51 @@ same_crossing_node(const crossing_node& a, const crossing_node& b) {
 //   embedding, exactly like examples/top/riemann's flat mode -- Im(b)
 //   is dropped.
 //
-// - onion: a direct CP^2 analogue of examples/top/riemann's onion mode,
-//   but simpler -- there, the "companion root" trick was needed because
-//   w and z played structurally different roles (w the fiber variable
-//   of an explicit branched cover, z the base) and had to be told apart
-//   from F's own coefficients. Here every catalog curve is just a single
-//   homogeneous F(X,Y,Z)=0 with no distinguished variable, so there's no
-//   "other root" to compute -- direction and bump both come straight off
-//   the point's own 3 homogeneous coordinates: Z (an arbitrary but fixed
-//   choice, uniform across every curve in the catalog, unlike picking
-//   "z" would have been before this project's whole point of dropping
-//   distinguished directions) is stereographically projected to a
-//   direction on S^2, and the bump is |X|+|Y| -- the sum of the moduli
-//   of the OTHER two homogeneous coordinates. Because every point is
-//   kept unit-normalized (|X|^2+|Y|^2+|Z|^2=1), |X|+|Y| is automatically
-//   bounded (<=sqrt(2)), so the bump stays well-behaved with no extra
-//   clamping.
+// - onion: a direct CP^2 analogue of examples/top/riemann's onion mode.
+//   Direction on S^2 comes from to_sphere() applied to ONE of the
+//   polygon's own dehomogenized chart coordinates (the same (a,b) flat
+//   mode uses, from the SAME per-polygon chart -- see pick_chart_polygon
+//   below), and the bump is the modulus of the OTHER one. Both (a,b) are
+//   true functions of the point in CP^2 (ratios of homogeneous
+//   coordinates), not of whichever arbitrary unit-norm representative
+//   happens to be stored for it -- essential, see the two bugs below,
+//   both found and fixed the same session (first one by the user
+//   re-looking at a Blender render, the second by the user recognizing
+//   the SHAPE of the first fix's remaining symptom).
 //
-//   FOUND AND FIXED (user reported "onion parece quebrada" -- confirmed
-//   by direct measurement, not just visually): feeding Z itself into
-//   to_sphere() -- as the comment used to say, "the same to_sphere()
-//   formula as before" -- is wrong, because to_sphere() is inverse
-//   stereographic projection FROM AN UNBOUNDED affine coordinate (as
-//   examples/top/riemann actually uses it, on the unbounded chart value
-//   z=from_sphere(...)), and Z here is bounded (|Z|<=1, since the
-//   representative is unit-normalized). Feeding a bounded input in
-//   means n=|Z|^2 only ever reaches [0,1], so to_sphere's own
-//   p[2]=(n-1)/(n+1) is confined to [-1,0] -- the WHOLE mesh collapses
-//   onto the closed southern hemisphere, never the northern one.
-//   Measured directly: every single exported onion vertex had its 3rd
-//   OBJ coordinate in [-0.999,0], zero exceptions, across the full
-//   elliptic-curve mesh. Fixed by feeding to_sphere() a genuinely
-//   unbounded quantity instead: zeta = Z/sqrt(|X|^2+|Y|^2) -- finite
-//   (0) exactly where Z=0 (south pole, unchanged), and |zeta|->infinity
-//   exactly as the point approaches [0:0:1] (X,Y->0), reaching the
-//   north pole there -- a genuine bijection from the whole unit disk
-//   |Z|<=1 onto the whole sphere, matching to_sphere()'s actual domain
-//   instead of only ever exercising half of its range.
+//   BUG 1, FIXED: an earlier version fed the raw homogeneous Z (bounded,
+//   |Z|<=1, since the representative is kept unit-normalized) directly
+//   into to_sphere(), which is inverse stereographic projection FROM AN
+//   UNBOUNDED affine coordinate (exactly how examples/top/riemann uses
+//   it, on the unbounded chart value z=from_sphere(...)). A bounded
+//   input means to_sphere's own p[2]=(|Z|^2-1)/(|Z|^2+1) never leaves
+//   [-1,0] -- confirmed directly, every exported vertex's 3rd OBJ
+//   coordinate was in [-0.999,0] with zero exceptions. The whole mesh
+//   collapsed onto the closed southern hemisphere.
+//
+//   BUG 2, FIXED (the user's own diagnosis: "parece que a identificação
+//   de vetores opostos causa só um hemisfério ser exibido corretamente
+//   e o resto colapsa"): the first fix (zeta=Z/sqrt(|X|^2+|Y|^2)) DID
+//   reach the whole sphere, but isn't actually a well-defined function
+//   of the CP^2 point -- [X:Y:Z] and [e^{i*theta}X:e^{i*theta}Y:e^{i*theta}Z]
+//   are THE SAME point for every theta (that's the whole equivalence
+//   CP^2 quotients by), but dividing a complex Z by a REAL modulus
+//   doesn't cancel that phase, so zeta itself rotates by theta as theta
+//   varies -- confirmed numerically (a Python check: same point, 5
+//   different representative phases, 5 different to_sphere() outputs,
+//   rotating around the vertical axis exactly as theta did). Different
+//   crossing-node computations landing on different representative
+//   phases for what's geometrically the same point then plot it in
+//   different places, which is what "only one hemisphere renders
+//   correctly, the rest collapses" looks like in practice (inconsistent,
+//   representative-dependent placement, not a clean hemisphere cutoff).
+//   Fixed by using an honest CHART RATIO instead (dehomogenize's own a,b
+//   -- Y/X & Z/X in chart 0, etc.): dividing complex by complex cancels
+//   any common phase exactly, so a,b are true functions of the point,
+//   confirmed by the same numerical check (5 phases, 1 identical
+//   output). pick_chart_polygon (already used by flat mode, to avoid
+//   stitching a polygon's vertices in inconsistent per-point charts) is
+//   now used for onion too, instead of onion hardcoding chart 0.
 double g_cutoff=1e300;
 bool g_onion=false;
 double g_onion_scale=0.5;
@@ -1224,19 +1232,24 @@ int pick_chart_polygon(const vector<crossing_node>& nodes, const vector<int>& cy
 }
 
 vec<3,double> project_for_viz(const pt3& p, int chart) {
+	cx a,b; dehomogenize(chart,p,a,b);
 	if(g_onion) {
-		// zeta, not Z itself -- see the class comment above for why
-		// to_sphere(Z) alone only ever reaches the southern hemisphere.
-		double R=std::sqrt(std::norm(p[0])+std::norm(p[1]));
-		cx zeta = (R>1e-12) ? (p[2]/R) : (p[2]*1e8); // R~0: practically at [0:0:1], the north pole
-		vec<3,double> dir=to_sphere(zeta);
-		double bump=std::abs(p[0])+std::abs(p[1]); // |X|+|Y|: radial displacement
+		// a,b are true functions of the CP^2 point (ratios of homogeneous
+		// coordinates, phase-invariant) -- see the class comment above for
+		// why that matters and why the raw homogeneous Z didn't work,
+		// twice over. Direction from 'a' (to_sphere needs a genuinely
+		// unbounded input, which a chart ratio actually is), bump from
+		// |b| (bounded by sqrt(2): 'chart' is picked so its own pivot
+		// coordinate is the largest of the 3, so both a,b have modulus
+		// <=sqrt(2) -- same bound the old |X|+|Y| formula had, no extra
+		// clamping needed here either).
+		vec<3,double> dir=to_sphere(a);
+		double bump=std::abs(b);
 		double r=1.0+g_onion_scale*bump;
 		vec<3,double> out;
 		for(int i=0;i<3;++i) out[i]=r*dir[i];
 		return out;
 	}
-	cx a,b; dehomogenize(chart,p,a,b);
 	vec<3,double> r;
 	r[0]=a.real(); r[1]=a.imag(); r[2]=b.real();
 	return r;
@@ -1248,7 +1261,7 @@ struct obj_writer {
 	obj_writer(const char* path) : out(path), nverts(0), nfaces(0), nclipped(0) {
 		if(g_onion)
 			out<<"# Riemann surface (CP^2 approach) extraction, onion projection: "
-					<<"direction=Z on S^2, radius=1+"<<g_onion_scale<<"*(|X|+|Y|)\n";
+					<<"direction=chart coord 'a' on S^2, radius=1+"<<g_onion_scale<<"*|b|\n";
 		else
 			out<<"# Riemann surface (CP^2 approach) extraction, projected via "
 					<<"per-point best affine chart (Re a, Im a, Re b)\n";
@@ -1256,7 +1269,7 @@ struct obj_writer {
 			out<<"# cutoff: polygons with a vertex farther than "<<g_cutoff<<" from the origin dropped\n";
 	}
 	void write_polygon(const vector<crossing_node>& nodes, const vector<int>& cyc) {
-		int chart=g_onion ? 0 : pick_chart_polygon(nodes,cyc); // one chart for the whole polygon
+		int chart=pick_chart_polygon(nodes,cyc); // one chart for the whole polygon, both projections
 		vector<vec<3,double> > pts(cyc.size());
 		for(size_t i=0;i<cyc.size();++i) pts[i]=project_for_viz(nodes[cyc[i]].p,chart);
 		if(!g_onion) {
