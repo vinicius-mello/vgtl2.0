@@ -28,7 +28,7 @@
 // is already isolated (dim(edge)+dim(surface)-dim(ambient)=1+2-3=0) --
 // no per-triangle Newton solve needed, just linear interpolation of f
 // along each sign-changing edge, refined by the same curvature-driven
-// adaptive criterion validated in riemann_pc2.cpp (see cell_priority
+// adaptive criterion validated in riemann_cp2.cpp (see cell_priority
 // below: gradient dispersion + optional --proximity weighting, ported
 // from C^3/CP^2's Hermitian inner product to R^3's plain dot()).
 
@@ -94,7 +94,7 @@ struct refine_app : do_nothing {
 
 // --- Refinement priority: same curvature (gradient dispersion) +
 // optional proximity-to-surface weighting validated in
-// riemann_pc2.cpp's cell_priority, ported from CP^2's Hermitian inner
+// riemann_cp2.cpp's cell_priority, ported from CP^2's Hermitian inner
 // product (hdot, with its U(1) phase-gauge subtlety) to R^3's plain
 // real dot() -- no gauge ambiguity here at all, gradient direction is
 // unambiguous up to nothing (not even a phase), so this is if anything
@@ -107,7 +107,7 @@ struct refine_app : do_nothing {
 // f(v)| (first-order distance-to-surface estimate), diam=the cell's
 // own Euclidean diameter -- saturates at 1 near the surface (no blowup
 // even at mind=0), decays toward 0 far from it. See
-// examples/top/riemann_PC2/riemann_pc2.cpp's cell_priority for the
+// examples/top/riemann_cp2/riemann_cp2.cpp's cell_priority for the
 // full derivation/rationale (identical idea, real instead of complex).
 bool g_proximity=false;
 
@@ -210,7 +210,7 @@ int main(int argc, char* argv[]) {
 	// --- Phase 1: seed mesh -- an axis-aligned box, Kuhn-triangulated
 	// into DIM!=6 tetrahedra by vgtl's own add_cube (orientation is
 	// already coherent by construction: no BFS re-derivation needed,
-	// unlike the Kuhnel CP^2 seed in riemann_pc2.cpp). ---
+	// unlike the Kuhnel CP^2 seed in riemann_cp2.cpp). ---
 	cout<<endl<<"--- seed mesh: axis-aligned box, Kuhn triangulation ---"<<endl;
 
 	Vertex(T) V[8];

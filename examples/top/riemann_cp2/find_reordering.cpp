@@ -411,8 +411,8 @@ int main() {
 	cout<<endl<<"// Kuhnel CP^2_9: 36 4-simplices, vertices reordered so that shared"<<endl;
 	cout<<"// facets sit at the same local index on both sides; sign = orientation"<<endl;
 	cout<<"// (parity of the permutation from ascending order)."<<endl;
-	cout<<"struct pc2_cell { int v[5]; int sign; };"<<endl;
-	cout<<"const pc2_cell pc2_cells[36] = {"<<endl;
+	cout<<"struct cp2_cell { int v[5]; int sign; };"<<endl;
+	cout<<"const cp2_cell cp2_cells[36] = {"<<endl;
 	for(int c=0;c<N;++c) {
 		cout<<"\t{ {";
 		for(int k=0;k<5;++k) cout<<reordered[c][k]<<(k<4?",":"");

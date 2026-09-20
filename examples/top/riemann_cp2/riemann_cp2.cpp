@@ -19,7 +19,7 @@
 #include <vgtl/top/maubach.hpp>
 #include <vgtl/top/do_nothing.hpp>
 #include <vgtl/alg/vec.hpp>
-#include "functions_pc2.hpp"
+#include "functions_cp2.hpp"
 
 // Seed mesh: A. Gaifullin's 15-vertex/108-cell triangulation of CP^2
 // (arXiv:0904.4222, also GAP simpcomp SCLib entry 397) -- Maubach-
@@ -224,7 +224,7 @@ pt3 apply_unitary(const cx M[3][3], const pt3& v) {
 bool g_generic=false;
 unsigned g_generic_seed=12345;
 
-// --- The curve and its derivatives, generic (see functions_pc2.hpp) ---
+// --- The curve and its derivatives, generic (see functions_cp2.hpp) ---
 // Only the gradient is needed now: refinement priority is gradient
 // dispersion across a cell's own vertices (see cell_priority below), not
 // a Hessian-based per-point signal, so no second derivatives are kept.
@@ -1283,7 +1283,7 @@ int main(int argc, char* argv[]) {
 			g_bernstein_selftest=true;
 		} else if(arg=="--list-functions") {
 			cout<<"available functions:"<<endl;
-			print_function_catalog_pc2(cout);
+			print_function_catalog_cp2(cout);
 			return 0;
 		} else {
 			cerr<<"unrecognized argument: "<<arg<<endl;
@@ -1295,10 +1295,10 @@ int main(int argc, char* argv[]) {
 		}
 	}
 
-	vector<catalog_entry_pc2>& catalog=function_catalog_pc2();
+	vector<catalog_entry_cp2>& catalog=function_catalog_cp2();
 	if(function_index<0 || function_index>=(int)catalog.size()) {
 		cerr<<"--function "<<function_index<<" out of range; available:"<<endl;
-		print_function_catalog_pc2(cerr);
+		print_function_catalog_cp2(cerr);
 		return 1;
 	}
 	set_curve(catalog[function_index].F);
@@ -1322,7 +1322,7 @@ int main(int argc, char* argv[]) {
 	cout<<endl;
 	if(!g_onion && g_cutoff<1e299) cout<<"cutoff: "<<g_cutoff<<endl;
 
-	string obj_path_s="riemann_pc2_"+catalog[function_index].name+(g_onion?"_onion":"")+".obj";
+	string obj_path_s="riemann_cp2_"+catalog[function_index].name+(g_onion?"_onion":"")+".obj";
 	const char* obj_path=obj_path_s.c_str();
 
 	// --- Phase 1: seed mesh -- Gaifullin's 15-vertex/108-cell

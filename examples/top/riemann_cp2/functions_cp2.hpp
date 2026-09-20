@@ -1,5 +1,5 @@
-#ifndef RIEMANN_PC2_FUNCTIONS_HPP
-#define RIEMANN_PC2_FUNCTIONS_HPP
+#ifndef RIEMANN_CP2_FUNCTIONS_HPP
+#define RIEMANN_CP2_FUNCTIONS_HPP
 
 // Catalog of test curves for the CP^2 approach: each is a single
 // homogeneous polynomial F(X,Y,Z) of degree d, given as a sparse list
@@ -52,7 +52,7 @@ inline poly_F3 diff_poly3(const poly_F3& p, int var) {
 	return q;
 }
 
-struct catalog_entry_pc2 {
+struct catalog_entry_cp2 {
 	std::string name;
 	std::string description;
 	poly_F3 F;
@@ -69,11 +69,11 @@ inline poly_F3 operator+(const poly_F3& a, const poly_F3& b) {
 	return r;
 }
 
-inline std::vector<catalog_entry_pc2>& function_catalog_pc2() {
-	static std::vector<catalog_entry_pc2> cat;
+inline std::vector<catalog_entry_cp2>& function_catalog_cp2() {
+	static std::vector<catalog_entry_cp2> cat;
 	if(cat.empty()) {
 		// Seed-vertex relationships below are for Gaifullin's 15-vertex
-		// CP^2 triangulation (see gaifullin_points() in riemann_pc2.cpp),
+		// CP^2 triangulation (see gaifullin_points() in riemann_cp2.cpp),
 		// NOT the project's earlier Kuhnel/Hesse-point seed -- exact-hit
 		// counts checked directly by evaluating each F at all 15
 		// Gaifullin vertices. Unlike the old Hesse-point seed (where only
@@ -95,7 +95,7 @@ inline std::vector<catalog_entry_pc2>& function_catalog_pc2() {
 			// Smooth conic XY - Z^2 = 0 -- genus 0, constant curvature.
 			// Hits 8/15 Gaifullin vertices exactly (checked directly):
 			// (13)(24), (14)(23), and all of (3,*),(4,*).
-			catalog_entry_pc2 e;
+			catalog_entry_cp2 e;
 			e.name="conic";
 			e.description="XY-Z^2=0 : smooth conic (genus 0), constant curvature; hits 8/15 Gaifullin "
 				"seed vertices exactly -- needs --generic-seed";
@@ -110,7 +110,7 @@ inline std::vector<catalog_entry_pc2>& function_catalog_pc2() {
 			// still 36.5% bad-cell at depth 10 without --generic-seed
 			// (19.0% with it) -- an exact-hit count of 0 does NOT make
 			// this a clean baseline here (see the note above this block).
-			catalog_entry_pc2 e;
+			catalog_entry_cp2 e;
 			e.name="fermat_cubic";
 			e.description="X^3+Y^3+Z^3=0 : smooth elliptic curve (genus 1); hits 0/15 Gaifullin seed "
 				"vertices exactly, but still needs --generic-seed (36.5%->19.0% bad-cell at depth "
@@ -122,7 +122,7 @@ inline std::vector<catalog_entry_pc2>& function_catalog_pc2() {
 			// Another Hesse-pencil member, less symmetric than Fermat.
 			// Hits 3/15 Gaifullin vertices exactly (checked directly):
 			// all of (4,*).
-			catalog_entry_pc2 e;
+			catalog_entry_cp2 e;
 			e.name="cubic_generic";
 			e.description="X^3+Y^3+Z^3-3XYZ=0 : Hesse pencil member away from Fermat; hits 3/15 "
 				"Gaifullin seed vertices exactly -- needs --generic-seed";
@@ -134,7 +134,7 @@ inline std::vector<catalog_entry_pc2>& function_catalog_pc2() {
 			// Kuhnel/Hesse seed (0/9); checked directly against the
 			// current Gaifullin seed: hits 8/15 exactly, all of
 			// (1,*),(2,*),(3,*),(4,*) at b=1,2 -- no longer clean.
-			catalog_entry_pc2 e;
+			catalog_entry_cp2 e;
 			e.name="quartic";
 			e.description="X^4+Y^4+Z^4=0 : smooth quartic (genus 3); hits 8/15 Gaifullin seed "
 				"vertices exactly -- needs --generic-seed (was a clean baseline on the project's "
@@ -153,7 +153,7 @@ inline std::vector<catalog_entry_pc2>& function_catalog_pc2() {
 			// directly against the current Gaifullin seed: hits 8/15
 			// exactly ((12)(34), (14)(23), all of (1,*),(4,*)) -- no
 			// longer clean, needs --generic-seed.
-			catalog_entry_pc2 e;
+			catalog_entry_cp2 e;
 			e.name="parabola";
 			e.description="X^2-YZ=0 : homogenization of examples/top/riemann's w^2-z (w=X/Z,z=Y/Z); "
 				"one branch point, at (w,z)=(0,0). Hits 8/15 Gaifullin seed vertices exactly -- needs "
@@ -167,7 +167,7 @@ inline std::vector<catalog_entry_pc2>& function_catalog_pc2() {
 			// F(w,z)=w^2-z^3+z, homogenized the same way: (X/Z)^2-(Y/Z)^3+
 			// (Y/Z)=0, times Z^3. Hits 2/15 Gaifullin vertices exactly
 			// (checked directly): (12)(34) and (14)(23).
-			catalog_entry_pc2 e;
+			catalog_entry_cp2 e;
 			e.name="elliptic";
 			e.description="X^2*Z-Y^3+Y*Z^2=0 : homogenization of examples/top/riemann's w^2-z^3+z "
 				"(w=X/Z,z=Y/Z); smooth elliptic curve (genus 1), branch points at z=0,+1,-1. Hits "
@@ -179,10 +179,10 @@ inline std::vector<catalog_entry_pc2>& function_catalog_pc2() {
 	return cat;
 }
 
-inline void print_function_catalog_pc2(std::ostream& out) {
-	std::vector<catalog_entry_pc2>& cat=function_catalog_pc2();
+inline void print_function_catalog_cp2(std::ostream& out) {
+	std::vector<catalog_entry_cp2>& cat=function_catalog_cp2();
 	for(size_t i=0;i<cat.size();++i)
 		out<<"  "<<i<<": "<<cat[i].name<<" -- "<<cat[i].description<<std::endl;
 }
 
-#endif // RIEMANN_PC2_FUNCTIONS_HPP
+#endif // RIEMANN_CP2_FUNCTIONS_HPP

@@ -36,7 +36,7 @@ typedef vgtl::nmt<DIM> T;
 T t;
 
 // Pool for the Newton root cache (--bernstein-adjacent memory technique,
-// ported from examples/top/riemann_PC2/riemann_pc2.cpp): the overwhelming
+// ported from examples/top/riemann_cp2/riemann_cp2.cpp): the overwhelming
 // majority of triangles have ZERO roots, so reserving 2 slots' worth of
 // storage (w_pt[2]+z_pt[2]+l1[2]+l2[2]) INSIDE every extra_data<2> paid
 // for a near-empty array on nearly every triangle. Instead, extra_data<2>
@@ -66,7 +66,7 @@ namespace vgtl {
 		// octahedron-vertex labels) were the same story: written at seed
 		// time and by refinement, never read anywhere. Recomputed on
 		// demand where actually needed (vertex_geom_resid, for
-		// --proximity) instead of cached, the same tradeoff riemann_pc2.cpp
+		// --proximity) instead of cached, the same tradeoff riemann_cp2.cpp
 		// made for its own per-vertex gradient cache -- F/Fw/Fz here are
 		// cheap Horner evaluations, unlike tval's resultant computation,
 		// which stays cached because it's genuinely expensive and shared
@@ -274,7 +274,7 @@ sphere_rot g_rot_w, g_rot_z; // set from main() when --generic is passed
 // differs between w and z), but now seed-controlled via --generic-seed
 // so the "does this actually fix it, or was it luck of one particular
 // rotation" question (raised for the analogous CP^2 --generic in
-// examples/top/riemann_PC2/) can be asked here too.
+// examples/top/riemann_cp2/) can be asked here too.
 unsigned g_generic_seed=12345;
 sphere_rot random_sphere_rot(std::mt19937& rng) {
 	std::normal_distribution<double> nd(0.0,1.0);
@@ -611,7 +611,7 @@ double cell_diam(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
 	return diam;
 }
 
-// --proximity (ported from riemann_pc2.cpp's proximity_factor/mind):
+// --proximity (ported from riemann_cp2.cpp's proximity_factor/mind):
 // first-order, scale-invariant distance-to-curve estimate at a vertex,
 // |F(v)|/|gradF(v)|, evaluated in whichever chart is actually valid there
 // -- the ordinary (w,z) chart, or the corner chart K(wr,zr) if EITHER
@@ -770,7 +770,7 @@ newton_on_triangle(const tri_frame& fr, double x, double y, double& out_l1, doub
 }
 
 // --- Bernstein-certified refinement/pruning (--bernstein), ported from
-// examples/top/riemann_PC2/riemann_pc2.cpp -- see there for the full
+// examples/top/riemann_cp2/riemann_cp2.cpp -- see there for the full
 // derivation. F(w,z) restricted to a 2-simplex (w,z)=(l0 W0+l1 W1+l2 W2,
 // l0 Z0+l1 Z1+l2 Z2), l0+l1+l2=1, is a polynomial of fixed total degree D
 // in the FREE (not constrained to sum to 1) variables (l0,l1,l2) -- i.e.
@@ -786,7 +786,7 @@ newton_on_triangle(const tri_frame& fr, double x, double y, double& out_l1, doub
 // w_far||z_far dispatch: the ordinary (w,z) polynomial F_raw, and the
 // corner (wr,zr) polynomial K (F_corner). triangle_chart_coords (below)
 // is shared verbatim by triangle_intersection and compute_bernstein_bounds
-// so both are provably evaluating the SAME domain -- riemann_pc2's own
+// so both are provably evaluating the SAME domain -- riemann_cp2's own
 // Bernstein work found a real bug from two call sites independently
 // picking a chart that could drift apart (see
 // riemann_pc2_bernstein_refinement memory); this factoring rules that out
@@ -858,7 +858,7 @@ void build_coefficient_grids() {
 
 // A degree-d homogeneous polynomial in the free (l0,l1,l2), stored as
 // monomial coefficients c[a][b] for l0^a l1^b l2^(d-a-b) -- dynamically
-// sized (unlike riemann_pc2's fixed 5x5 grid) since this catalog's degree
+// sized (unlike riemann_cp2's fixed 5x5 grid) since this catalog's degree
 // isn't capped in advance.
 struct bary_poly {
 	int d;
@@ -957,7 +957,7 @@ void get_subtriangle(int s, const cpt& P0,const cpt& P1,const cpt& P2,
 
 // Bernstein bounds for F restricted to the chart-triangle (P0,P1,P2),
 // optionally tightened by `level` rounds of 1-to-4 triangular subdivision
-// -- see riemann_pc2.cpp's own bernstein_bounds_recursive for the full
+// -- see riemann_cp2.cpp's own bernstein_bounds_recursive for the full
 // rationale (this is that function, generalized from a single 3-chart
 // homogeneous curve to a 2-chart (ordinary/corner) affine one).
 void bernstein_bounds_recursive(const vector<vector<cx> >& C, int Dtotal,
@@ -979,7 +979,7 @@ void bernstein_bounds_recursive(const vector<vector<cx> >& C, int Dtotal,
 // mesh, that the level-0/level-1 enclosures actually contain the TRUE
 // range of Re(F_raw)/Im(F_raw) over a sample triangle (brute-force
 // sampled), and that level-1's box is a subset of level-0's. Exactly the
-// kind of check that caught riemann_pc2's chart-domain mismatch bug in
+// kind of check that caught riemann_cp2's chart-domain mismatch bug in
 // the first place -- kept as a real regression test, not a one-off.
 bool g_bernstein_selftest=false;
 
@@ -1146,7 +1146,7 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 	// Found roots stay in local temporaries until the final count is
 	// known, then get pushed as one contiguous run into g_roots below
 	// (see extra_data<2>::root_idx) -- the pooled-storage technique
-	// ported from riemann_pc2.cpp.
+	// ported from riemann_cp2.cpp.
 	double tmpl1[2],tmpl2[2]; cx tmpw[2],tmpz[2]; int nfound=0;
 	for(int s=0; s<nseeds && nfound<2; ++s) {
 		double sx,sy; bary_to_xy(fr,seeds[s][0],seeds[s][1],sx,sy);
@@ -1444,7 +1444,7 @@ int main(int argc, char* argv[]) {
 		// gave statistically indistinguishable bad-cell rates (both
 		// ~0.1-1.2%, both >10x better than no --generic at all; neither
 		// consistently beat the other across seeds). So this is now done
-		// exactly the way examples/top/riemann_PC2/riemann_pc2.cpp does
+		// exactly the way examples/top/riemann_cp2/riemann_cp2.cpp does
 		// it: ONE mesh-vertex-position transform, not a wrapper re-run on
 		// every F evaluation. GA/GB/GC/GD and everything built on them
 		// (to_wr/to_zr, onion_other_root) are kept, not deleted -- they

@@ -301,7 +301,7 @@ from adjacent 4-simplices -- see *Known limitations*).
   per-vertex/per-triangle auxiliary caches were shrunk (dead `fw`/`fz`/
   `w_label`/`z_label` fields removed, the 2-root Newton cache moved out
   of `extra_data<2>` into a flat pool, matching the memory work done in
-  `examples/top/riemann_PC2/riemann_pc2.cpp`) -- measured ~52% lower
+  `examples/top/riemann_cp2/riemann_cp2.cpp`) -- measured ~52% lower
   peak RSS at the same `--depth`/`--threshold`, same extraction result,
   with no other flags involved.
 - **`branch_gap` is an order-of-magnitude proxy for `n>2`.** It's the
@@ -341,8 +341,8 @@ Run:
 | `--onion` | off | export via the onion projection (nested spheres) instead of the flat `(Re w, Im w, Re z)` one -- see Phase 4 |
 | `--onion-scale X` | `0.3` | radial spread for `--onion`; output radius stays within `[1-X, 1+X]` |
 | `--cutoff X` | off | drop any extracted polygon with a vertex farther than `X` from the origin in the projected 3D point -- keeps pole-proxy outliers from blowing out the flat projection's bounding box; ignored under `--onion`, where the radius is already `~1` by construction |
-| `--proximity` | off | weight `cell_priority` by `diam/(mind+diam)` (`mind` = a first-order distance-to-curve estimate at the cell's own vertices) to bias refinement toward the curve itself -- ported from `riemann_pc2.cpp`; cuts subdivisions/final cell count without changing the bad-cell rate |
-| `--bernstein` | off | use a certified Bernstein-Bezier enclosure of `F` over each 2-simplex, instead of `branch_gap`, both to PRUNE cells that provably can't contain a crossing (dropped forever, never refined again) and to rank the survivors -- ported from `riemann_pc2.cpp` |
+| `--proximity` | off | weight `cell_priority` by `diam/(mind+diam)` (`mind` = a first-order distance-to-curve estimate at the cell's own vertices) to bias refinement toward the curve itself -- ported from `riemann_cp2.cpp`; cuts subdivisions/final cell count without changing the bad-cell rate |
+| `--bernstein` | off | use a certified Bernstein-Bezier enclosure of `F` over each 2-simplex, instead of `branch_gap`, both to PRUNE cells that provably can't contain a crossing (dropped forever, never refined again) and to rank the survivors -- ported from `riemann_cp2.cpp` |
 | `--bernstein-level N` | `0` | implies `--bernstein`; rounds of 1-to-4 triangular subdivision used to tighten the certified enclosure before caching it |
 | `--bernstein-selftest` | -- | brute-force-verify the Bernstein enclosure machinery against a sample triangle (independent of the mesh/curve catalog) and exit |
 | `--list-functions` | -- | print the curve catalog and exit |

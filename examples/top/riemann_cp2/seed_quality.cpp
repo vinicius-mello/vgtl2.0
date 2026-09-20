@@ -1,10 +1,10 @@
 // Standalone seed-mesh quality diagnostic: compares Kuhnel's 9-vertex
 // CP^2 (fails Maubach compatibility, kept only as a numeric reference)
 // against Gaifullin's 15-vertex CP^2 (the seed actually used by
-// riemann_pc2.cpp), using max/min Fubini-Study edge-length ratio per
+// riemann_cp2.cpp), using max/min Fubini-Study edge-length ratio per
 // cell as the quality metric.
 //
-// Coordinates and cell lists copied verbatim from riemann_pc2.cpp
+// Coordinates and cell lists copied verbatim from riemann_cp2.cpp
 // (Gaifullin, current HEAD) and from commit 4b0e61b (Kuhnel, since the
 // project since removed that seed from the live file).
 //
@@ -180,7 +180,7 @@ void analyze(const char* label, const vector<pt3>& pts, const vector<cell5>& cel
 int main() {
 	analyze("Kuhnel 9-vertex / 36 cells (fails Maubach compatibility -- reference only)",
 		hesse_points(), kuhnel_cells());
-	analyze("Gaifullin 15-vertex / 108 cells (current riemann_pc2.cpp seed)",
+	analyze("Gaifullin 15-vertex / 108 cells (current riemann_cp2.cpp seed)",
 		gaifullin_points(), gaifullin_cells());
 	return 0;
 }
