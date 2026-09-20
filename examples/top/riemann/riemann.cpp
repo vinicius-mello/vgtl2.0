@@ -557,16 +557,41 @@ double sphere_dist(const vec<3,double>& a, const vec<3,double>& b) {
 	return sqrt(s);
 }
 
-// t_sigma = (cell's own diameter in w) / (smallest cached branch-gap
-// among its vertices). Large means "this cell is wide relative to how
-// close the sheets get here" -- the actual risk factor for a triangle
-// inside it seeing more than one root -- rather than just "some vertex
-// is near a branch point" (which says nothing about the cell's size).
-// Diameter is measured on the w-sphere (chordal distance, bounded in
-// [0,2]), not in the from_sphere() chart -- unlike a chart diameter, this
-// stays meaningful right up to a pole, so cells near one no longer need
-// to be excluded here (see sphere_is_far/the corner chart above for how
-// extraction itself handles them).
+// t_sigma = (cell's own diameter) / (smallest cached branch-gap among
+// its vertices). Large means "this cell is wide relative to how close
+// the sheets get here" -- the actual risk factor for a triangle inside
+// it seeing more than one root -- rather than just "some vertex is near
+// a branch point" (which says nothing about the cell's size). Diameter
+// is measured on the w/z SPHERES (chordal distance, bounded in [0,2]
+// per factor, combined below in cell_diam), not in the from_sphere()
+// chart -- unlike a chart diameter, this stays meaningful right up to a
+// pole, so cells near one no longer need to be excluded here (see
+// sphere_is_far/the corner chart above for how extraction itself
+// handles them).
+//
+// FOUND AND FIXED: this used to measure w's own diameter ONLY, never
+// z's -- so a cell narrow in w but genuinely wide in z (an equally
+// possible, equally risky situation -- z's own local behavior isn't
+// coupled to w's diameter at all) could satisfy --threshold and stop
+// refining while still spanning a large z-range. The user spotted the
+// visible symptom in a --onion render ("uns spikes gigantes na parte
+// interna") -- traced to crossing_node pairs, legitimately adjacent in
+// the mesh and each individually a genuine root of F, but with a raw
+// (w,z) separation of several units -- confirmed the affected cells'
+// priority ratio was already below --threshold well before their
+// ABSOLUTE z-spread was small, and confirmed this persists at higher
+// --depth unchanged (same worst-case edge length at depth 10 and 14 --
+// once a cell's ratio drops below threshold it is never revisited,
+// regardless of how much deeper other cells get pushed). Fixed by using
+// the SAME combined product-space diameter (cell_diam, below) already
+// used for --proximity, unconditionally -- exactly the discipline
+// examples/top/riemann_cp2/riemann_cp2.cpp never needed a fix for,
+// since its single Fubini-Study metric covers every direction by
+// construction and has no "which factor did we forget" asymmetry to
+// have. A tighter --threshold also helps directly (confirmed: 0.01 vs
+// the default 0.1 cut the worst edge from ~2x this cell's own scale
+// down to a fraction of it) -- the two are complementary, not
+// alternatives.
 // A cell whose 5 vertices straddle the sphere_is_far cutoff (some past
 // it, some not, in either w or z) gets top priority regardless of
 // branch_gap: triangle_intersection picks its chart per-triangle from
@@ -595,10 +620,10 @@ bool straddles_far(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
 
 // Combined product-space diameter (max pairwise chordal distance,
 // combining both factors the way octaprod_quality.cpp's own seed-quality
-// metric does), used by --proximity as "the cell's own size" -- unlike
-// cell_priority's own wdiam (w-factor only, by design: see the comment
-// above), proximity needs a size measure that doesn't ignore a cell that
-// happens to be flat in w but wide in z.
+// metric does) -- used as cell_priority's own size term (see its comment
+// for why a w-only diameter was a real bug) AND by --proximity as "the
+// cell's own size", so a cell flat in w but wide in z is never ignored
+// by either.
 double cell_diam(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
 	double diam=0;
 	for(int i=0;i<=DIM;++i)
@@ -655,13 +680,7 @@ double cell_priority(const T& t, Cell(T) cv) {
 	if(straddles_far(t,vs)) return 1e18;
 	double mingap=tval(t,vs[0]);
 	for(int i=0;i<=DIM;++i) if(tval(t,vs[i])<mingap) mingap=tval(t,vs[i]);
-	double wdiam=0;
-	for(int i=0;i<=DIM;++i)
-		for(int j=i+1;j<=DIM;++j) {
-			double d=sphere_dist(w_sphere(t,vs[i]),w_sphere(t,vs[j]));
-			if(d>wdiam) wdiam=d;
-		}
-	double priority=wdiam/(mingap+1e-12);
+	double priority=cell_diam(t,vs)/(mingap+1e-12);
 	if(g_proximity) priority*=proximity_factor(t,vs);
 	return priority;
 }
@@ -1830,8 +1849,23 @@ int main(int argc, char* argv[]) {
 				} else if(ntn==4) {
 					// Two sheets cross this tetrahedron: pair the 4 points
 					// into 2 edges by whichever pairing has the smaller
-					// total (w,z) length (the two sheets don't cross each
-					// other generically, so the short pairing is correct).
+					// total length (the two sheets don't cross each other
+					// generically, so the short pairing is correct) --
+					// measured on the w/z SPHERES (chordal, via to_sphere),
+					// not as raw (w,z) chart distance. Found by the user
+					// spotting giant spikes in a --onion render, root-caused
+					// by checking the actual (w,z) values at spike
+					// endpoints: near a pole, a tiny difference on the
+					// sphere can be an enormous difference in the affine
+					// chart (that's the whole point of a chart blowing up
+					// there), so the raw-coordinate "shortest total
+					// distance" heuristic can pick the WRONG pairing right
+					// where it matters most. Same lesson examples/top/
+					// riemann_cp2/riemann_cp2.cpp's own analogous pairing
+					// already applies (fs_dist there, sphere_dist here) --
+					// this file's own cell_priority already uses sphere_dist
+					// for exactly this reason (see its comment), just never
+					// carried over to this second Euclidean-distance site.
 					static const int pairings[3][4]={{0,1,2,3},{0,2,1,3},{0,3,1,2}};
 					int best=0; double bestcost=1e300;
 					for(int c=0;c<3;++c) {
@@ -1839,7 +1873,9 @@ int main(int argc, char* argv[]) {
 						for(int e=0;e<2;++e) {
 							const crossing_node& A=nodes[tnodes[pairings[c][2*e]]];
 							const crossing_node& B=nodes[tnodes[pairings[c][2*e+1]]];
-							cost+=sqrt(std::norm(A.w-B.w)+std::norm(A.z-B.z));
+							double dw=sphere_dist(to_sphere(A.w),to_sphere(B.w));
+							double dz=sphere_dist(to_sphere(A.z),to_sphere(B.z));
+							cost+=sqrt(dw*dw+dz*dz);
 						}
 						if(cost<bestcost) { bestcost=cost; best=c; }
 					}

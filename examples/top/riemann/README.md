@@ -308,6 +308,31 @@ from adjacent 4-simplices -- see *Known limitations*).
   `n(n-1)`-th root of the resultant, which is exact for a single pair
   of roots (`n=2`) but is a product over *all* pairs for `n>2`, not
   just the closest pair. Untested on cubic-or-higher `F`.
+- **`--threshold` is relative, not absolute, so far-from-any-branch-point
+  cells can stay large in raw `(w,z)` terms even after "converging".**
+  `cell_priority`/`cell_priority_bernstein` both compare a cell's own
+  size against something LOCAL (`branch_gap`, or the Bernstein box
+  width) -- a region with nothing driving refinement locally stops
+  early, at whatever absolute size it happens to be at. Symptom seen and
+  fixed once: giant spikes in a `--onion` render, traced to two
+  genuinely different, individually-correct roots of `F`, found on
+  different faces of the same (large, but "converged" per the ratio)
+  tetrahedron, connected as if adjacent. Fixed a real, unconditional bug
+  in `cell_priority` (it only ever measured `w`'s own diameter, never
+  `z`'s -- now uses the combined `cell_diam`, same as `--proximity`) and
+  in the 4-node pairing heuristic (now measured on the `w`/`z` spheres,
+  not raw chart distance, the same lesson
+  `examples/top/riemann_cp2/riemann_cp2.cpp`'s analogous pairing already
+  applied via `fs_dist`). This measurably helps under the *default*
+  `cell_priority`, and a stricter `--threshold` (e.g. `0.01` vs the
+  default `0.1`) helps further there too (confirmed: worst edge length
+  dropped roughly 10x at the same `--depth`). **Under `--bernstein`,
+  though, its own priority formula has the same "relative, not
+  absolute" blind spot in a different shape, and does NOT respond the
+  same way to a stricter `--threshold`** (tested: made a case measurably
+  *worse*, not better) -- this remains unresolved; `--bernstein`'s
+  own size-insensitivity would need its own dedicated fix, not a
+  borrowed one.
 
 ## Usage
 
