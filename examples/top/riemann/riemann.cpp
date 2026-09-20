@@ -5,9 +5,11 @@
 #include <queue>
 #include <set>
 #include <map>
+#include <vector>
 #include <complex>
 #include <cmath>
 #include <random>
+#include <limits>
 #include <vgtl/top/model/nmt.hpp>
 #include <vgtl/utl/array_cons.hpp>
 #include <vgtl/top/add_simplex.hpp>
@@ -33,16 +35,43 @@ typedef vgtl::nmt<DIM> T;
 
 T t;
 
+// Pool for the Newton root cache (--bernstein-adjacent memory technique,
+// ported from examples/top/riemann_PC2/riemann_pc2.cpp): the overwhelming
+// majority of triangles have ZERO roots, so reserving 2 slots' worth of
+// storage (w_pt[2]+z_pt[2]+l1[2]+l2[2]) INSIDE every extra_data<2> paid
+// for a near-empty array on nearly every triangle. Instead, extra_data<2>
+// holds a single index into this flat pool (root_idx, -1 if empty); a
+// triangle with nroots>0 owns the contiguous run g_roots[root_idx ..
+// root_idx+nroots-1]. Never shrinks (matches nmt's own no-real-deletion
+// semantics), same lifetime pattern extra_data itself already has.
+// w,z stored as complex<float> (halves this pool's footprint): these are
+// cached crossing-point positions used only for extraction/visualization,
+// never fed back into the geometry, so the precision loss is harmless.
+struct root_data { std::complex<float> w,z; double l1,l2; };
+vector<root_data> g_roots;
+
+std::complex<float> narrowc(cx z) { return std::complex<float>((float)z.real(),(float)z.imag()); }
+cx widenc(std::complex<float> z) { return cx((double)z.real(),(double)z.imag()); }
+
 namespace vgtl {
 
 	template <>
 	struct extra_data<0> {
 		vec<3,double> w_sphere;
 		vec<3,double> z_sphere;
-		int w_label; // -1 for vertices created by refinement
-		int z_label;
-		std::complex<double> fw, fz; // dF/dw, dF/dz at this vertex
-		double tval;                 // 1/(|fw|^2+|fz|^2): refinement priority
+		// dF/dw, dF/dz used to be cached here too, but nothing ever read
+		// them back (tval below is computed independently, from
+		// branch_gap()/branch_gap_corner(), not from the gradient) --
+		// dead storage, removed. w_label/z_label (the originating
+		// octahedron-vertex labels) were the same story: written at seed
+		// time and by refinement, never read anywhere. Recomputed on
+		// demand where actually needed (vertex_geom_resid, for
+		// --proximity) instead of cached, the same tradeoff riemann_pc2.cpp
+		// made for its own per-vertex gradient cache -- F/Fw/Fz here are
+		// cheap Horner evaluations, unlike tval's resultant computation,
+		// which stays cached because it's genuinely expensive and shared
+		// across every cell incident to the vertex.
+		double tval; // cached branch_gap/branch_gap_corner estimate
 	};
 
 	vec<3,double> w_sphere(const T& t, Vertex(T) v) { return attr(t,v)->w_sphere; }
@@ -51,26 +80,30 @@ namespace vgtl {
 	void w_sphere_set(T& t, Vertex(T) v, const vec<3,double>& p) { attr(t,v)->w_sphere=p; }
 	void z_sphere_set(T& t, Vertex(T) v, const vec<3,double>& p) { attr(t,v)->z_sphere=p; }
 
-	int w_label(const T& t, Vertex(T) v) { return attr(t,v)->w_label; }
-	int z_label(const T& t, Vertex(T) v) { return attr(t,v)->z_label; }
-
-	void w_label_set(T& t, Vertex(T) v, int i) { attr(t,v)->w_label=i; }
-	void z_label_set(T& t, Vertex(T) v, int i) { attr(t,v)->z_label=i; }
-
 	double tval(const T& t, Vertex(T) v) { return attr(t,v)->tval; }
 
 	// Cache of the F=0 intersection point(s) of a 2-simplex, computed
 	// lazily by triangle_intersection(). A triangle can genuinely be
 	// crossed by more than one sheet (F has degree n in w), so up to 2
 	// roots are kept, each identified by its barycentric coordinates
-	// (l1,l2), with l0=1-l1-l2.
+	// (l1,l2), with l0=1-l1-l2 -- but see root_data/g_roots above: the
+	// roots themselves live in a flat pool now, not inline here.
 	template <>
 	struct extra_data<2> {
-		bool computed;
-		int nroots;
-		std::complex<double> w_pt[2], z_pt[2];
-		double l1[2], l2[2];
-		extra_data() : computed(false), nroots(0) {}
+		int root_idx; // -1 = no roots; else indexes g_roots[root_idx..root_idx+nroots-1]
+		// --bernstein (see compute_bernstein_bounds): a certified
+		// real-interval enclosure of Re(F) and Im(F) over this 2-simplex,
+		// from its Bernstein-Bezier coefficients -- immutable once the
+		// triangle's 3 vertices exist, cached the same way the Newton
+		// roots above are. float, not double, for the same reason as
+		// root_data::w,z: a certified enclosure used only for
+		// pruning/priority, never fed back into the geometry (see the
+		// outward rounding in compute_bernstein_bounds()).
+		float reLo,reHi,imLo,imHi;
+		unsigned char computed;
+		unsigned char nroots;
+		unsigned char bernstein_computed;
+		extra_data() : root_idx(-1), computed(0), nroots(0), bernstein_computed(0) {}
 	};
 
 }
@@ -78,11 +111,6 @@ namespace vgtl {
 // Labels for the 6 octahedron vertices: 0, 1, -1, i, -i, infinity.
 // 0 <-> south pole, infinity <-> north pole (stereographic projection).
 enum { LZERO=0, LONE=1, LMONE=2, LI=3, LMI=4, LINF=5, NLABELS=6 };
-
-const char* label_name(int l) {
-	static const char* names[NLABELS] = { "0", "1", "-1", "i", "-i", "inf" };
-	return names[l];
-}
 
 vec<3,double> label_sphere(int l) {
 	vec<3,double> p;
@@ -462,10 +490,7 @@ double branch_gap_corner(cx zr) {
 }
 
 void compute_vertex_data(T& t, Vertex(T) v) {
-	cx w=from_sphere(w_sphere(t,v));
 	cx z=from_sphere(z_sphere(t,v));
-	attr(t,v)->fw=Fw(w,z);
-	attr(t,v)->fz=Fz(w,z);
 	// Cached local branch-gap estimate (small = close to a branch
 	// point); cell_priority() below combines this with the cell's own
 	// w-extent, since "close to branch point" alone doesn't say the
@@ -517,8 +542,6 @@ struct refine_app : do_nothing {
 		Vertex(T) v=add(t);
 		w_sphere_set(t,v,slerp_midpoint(w_sphere(t,vs[0]),w_sphere(t,vs[1])));
 		z_sphere_set(t,v,slerp_midpoint(z_sphere(t,vs[0]),z_sphere(t,vs[1])));
-		w_label_set(t,v,-1);
-		z_label_set(t,v,-1);
 		compute_vertex_data(t,v);
 		return v;
 	}
@@ -570,6 +593,62 @@ bool straddles_far(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
 	return (wf&&wn)||(zf&&zn);
 }
 
+// Combined product-space diameter (max pairwise chordal distance,
+// combining both factors the way octaprod_quality.cpp's own seed-quality
+// metric does), used by --proximity as "the cell's own size" -- unlike
+// cell_priority's own wdiam (w-factor only, by design: see the comment
+// above), proximity needs a size measure that doesn't ignore a cell that
+// happens to be flat in w but wide in z.
+double cell_diam(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
+	double diam=0;
+	for(int i=0;i<=DIM;++i)
+		for(int j=i+1;j<=DIM;++j) {
+			double dw=sphere_dist(w_sphere(t,vs[i]),w_sphere(t,vs[j]));
+			double dz=sphere_dist(z_sphere(t,vs[i]),z_sphere(t,vs[j]));
+			double d=std::sqrt(dw*dw+dz*dz);
+			if(d>diam) diam=d;
+		}
+	return diam;
+}
+
+// --proximity (ported from riemann_pc2.cpp's proximity_factor/mind):
+// first-order, scale-invariant distance-to-curve estimate at a vertex,
+// |F(v)|/|gradF(v)|, evaluated in whichever chart is actually valid there
+// -- the ordinary (w,z) chart, or the corner chart K(wr,zr) if EITHER
+// coordinate is far (matching triangle_intersection's own w_far||z_far
+// dispatch, not compute_vertex_data's z-only one, since this is meant to
+// mirror the chart a triangle containing this vertex would actually use).
+double vertex_geom_resid(const T& t, Vertex(T) v) {
+	vec<3,double> ws=w_sphere(t,v), zs=z_sphere(t,v);
+	if(sphere_is_far(ws) || sphere_is_far(zs)) {
+		cx wr=to_wr(recip_from_sphere(ws)), zr=to_zr(recip_from_sphere(zs));
+		cx Fv=F_corner(wr,zr), fw=Fwr_corner(wr,zr), fz=Fzr_corner(wr,zr);
+		double gn=std::sqrt(std::norm(fw)+std::norm(fz));
+		return (gn>1e-300) ? std::abs(Fv)/gn : std::abs(Fv);
+	}
+	cx w=from_sphere(ws), z=from_sphere(zs);
+	cx Fv=F(w,z), fw=Fw(w,z), fz=Fz(w,z);
+	double gn=std::sqrt(std::norm(fw)+std::norm(fz));
+	return (gn>1e-300) ? std::abs(Fv)/gn : std::abs(Fv);
+}
+
+// diam/(mind+diam): saturates at 1 (no blowup even at mind=0) once the
+// curve is within about one cell diameter, decays toward 0 many cell
+// diameters away -- see riemann_pc2_gradient_dispersion memory for why
+// plain 1/|F| is the wrong shape (blows up exactly as a cell shrinks onto
+// the curve, defeating convergence).
+double proximity_factor(const T& t, const vgtl::array<Vertex(T),DIM+1>& vs) {
+	double mind=1e300;
+	for(int i=0;i<=DIM;++i) {
+		double dv=vertex_geom_resid(t,vs[i]);
+		if(dv<mind) mind=dv;
+	}
+	double diam=cell_diam(t,vs);
+	return diam/(mind+diam);
+}
+
+bool g_proximity=false;
+
 double cell_priority(const T& t, Cell(T) cv) {
 	vgtl::array<Vertex(T),DIM+1> vs;
 	vertices(t,cv,vs);
@@ -582,7 +661,9 @@ double cell_priority(const T& t, Cell(T) cv) {
 			double d=sphere_dist(w_sphere(t,vs[i]),w_sphere(t,vs[j]));
 			if(d>wdiam) wdiam=d;
 		}
-	return wdiam/(mingap+1e-12);
+	double priority=wdiam/(mingap+1e-12);
+	if(g_proximity) priority*=proximity_factor(t,vs);
+	return priority;
 }
 
 // Real inner product of two complex numbers viewed as vectors in R^2
@@ -688,6 +769,322 @@ newton_on_triangle(const tri_frame& fr, double x, double y, double& out_l1, doub
 	return true;
 }
 
+// --- Bernstein-certified refinement/pruning (--bernstein), ported from
+// examples/top/riemann_PC2/riemann_pc2.cpp -- see there for the full
+// derivation. F(w,z) restricted to a 2-simplex (w,z)=(l0 W0+l1 W1+l2 W2,
+// l0 Z0+l1 Z1+l2 Z2), l0+l1+l2=1, is a polynomial of fixed total degree D
+// in the FREE (not constrained to sum to 1) variables (l0,l1,l2) -- i.e.
+// a genuine triangular Bezier/Bernstein patch, since w(l),z(l) are each
+// linear and homogeneous in (l0,l1,l2). Its Bernstein-Bezier coefficients
+// enclose its range on the triangle (a partition-of-unity convex
+// combination), so [min,max] of Re and Im of those coefficients is a
+// CERTIFIED enclosure of Re(F),Im(F) on that triangle. A cell can be
+// dropped from refinement forever, not just deprioritized, once none of
+// its 10 triangular faces has both ranges straddling 0.
+//
+// Two "charts" here, exactly matching triangle_intersection's own
+// w_far||z_far dispatch: the ordinary (w,z) polynomial F_raw, and the
+// corner (wr,zr) polynomial K (F_corner). triangle_chart_coords (below)
+// is shared verbatim by triangle_intersection and compute_bernstein_bounds
+// so both are provably evaluating the SAME domain -- riemann_pc2's own
+// Bernstein work found a real bug from two call sites independently
+// picking a chart that could drift apart (see
+// riemann_pc2_bernstein_refinement memory); this factoring rules that out
+// by construction rather than by convention.
+bool triangle_chart_coords(const T& t, const vgtl::array<Vertex(T),3>& vs,
+														cx& w0,cx& w1,cx& w2, cx& z0,cx& z1,cx& z2) {
+	bool w_far=false, z_far=false;
+	for(int k=0;k<3;++k) {
+		if(sphere_is_far(w_sphere(t,vs[k]))) w_far=true;
+		if(sphere_is_far(z_sphere(t,vs[k]))) z_far=true;
+	}
+	bool far=w_far||z_far;
+	if(far) {
+		w0=to_wr(recip_from_sphere(w_sphere(t,vs[0])));
+		w1=to_wr(recip_from_sphere(w_sphere(t,vs[1])));
+		w2=to_wr(recip_from_sphere(w_sphere(t,vs[2])));
+		z0=to_zr(recip_from_sphere(z_sphere(t,vs[0])));
+		z1=to_zr(recip_from_sphere(z_sphere(t,vs[1])));
+		z2=to_zr(recip_from_sphere(z_sphere(t,vs[2])));
+	} else {
+		w0=from_sphere(w_sphere(t,vs[0]));
+		w1=from_sphere(w_sphere(t,vs[1]));
+		w2=from_sphere(w_sphere(t,vs[2]));
+		z0=from_sphere(z_sphere(t,vs[0]));
+		z1=from_sphere(z_sphere(t,vs[1]));
+		z2=from_sphere(z_sphere(t,vs[2]));
+	}
+	return far;
+}
+
+bool g_bernstein=false;
+int g_bernstein_level=0;
+
+// F_raw(w,z) = w^n + sum_{i=0}^{n-1} f_i(z) w^i, as a coefficient grid
+// Cord[p][q] = coefficient of w^p z^q -- built once per curve (see
+// build_coefficient_grids, called from main() right after set_curve).
+// Ccorner[p][q] is the analogous grid for K(wr,zr)=F_corner, read off
+// fi_corner's own construction (wr^(n-i) * (g_F.c[i] reversed/padded to
+// degree g_dz), plus the standalone zr^g_dz term) rather than
+// re-deriving it: same coefficients, just regrouped into a flat (p,q)
+// table instead of F_corner's per-i loop, so building it here can never
+// silently diverge from what F_corner/Fwr_corner/Fzr_corner actually
+// compute.
+vector<vector<cx> > g_Cord, g_Ccorner;
+int g_Dord=0, g_Dcorner=0;
+
+void build_coefficient_grids() {
+	int n=g_F.n;
+	int maxq=0;
+	for(int i=0;i<n;++i) maxq=std::max(maxq,(int)g_F.c[i].size()-1);
+	g_Cord.assign(n+1, vector<cx>(maxq+1, cx(0,0)));
+	g_Cord[n][0]+=cx(1,0);
+	for(int i=0;i<n;++i)
+		for(int j=0;j<(int)g_F.c[i].size();++j)
+			g_Cord[i][j]+=g_F.c[i][j];
+	g_Dord=0;
+	for(int p=0;p<=n;++p) for(int q=0;q<=maxq;++q)
+		if(g_Cord[p][q]!=cx(0,0)) g_Dord=std::max(g_Dord,p+q);
+
+	g_Ccorner.assign(n+1, vector<cx>(g_dz+1, cx(0,0)));
+	g_Ccorner[0][g_dz]+=cx(1,0); // the standalone zr^dz term in F_corner
+	for(int i=0;i<n;++i)
+		for(int k=0;k<(int)g_F.c[i].size();++k)
+			g_Ccorner[n-i][g_dz-k]+=g_F.c[i][k];
+	g_Dcorner=0;
+	for(int p=0;p<=n;++p) for(int q=0;q<=g_dz;++q)
+		if(g_Ccorner[p][q]!=cx(0,0)) g_Dcorner=std::max(g_Dcorner,p+q);
+}
+
+// A degree-d homogeneous polynomial in the free (l0,l1,l2), stored as
+// monomial coefficients c[a][b] for l0^a l1^b l2^(d-a-b) -- dynamically
+// sized (unlike riemann_pc2's fixed 5x5 grid) since this catalog's degree
+// isn't capped in advance.
+struct bary_poly {
+	int d;
+	vector<vector<cx> > c;
+	bary_poly() : d(0) {}
+	void init(int deg) { d=deg; c.assign(d+1, vector<cx>(d+1, cx(0,0))); }
+};
+
+double fact3(int n) { double r=1; for(int i=2;i<=n;++i) r*=i; return r; }
+double multinom3(int d,int a,int b,int cc) { return fact3(d)/(fact3(a)*fact3(b)*fact3(cc)); }
+
+// (l0*X0+l1*X1+l2*X2)^n via the trinomial theorem.
+bary_poly pow_linear3(cx X0,cx X1,cx X2,int n) {
+	bary_poly r; r.init(n);
+	for(int p=0;p<=n;++p)
+		for(int q=0;q<=n-p;++q) {
+			int rr=n-p-q;
+			cx coeff=multinom3(n,p,q,rr)*ipow(X0,p)*ipow(X1,q)*ipow(X2,rr);
+			r.c[p][q]+=coeff;
+		}
+	return r;
+}
+
+bary_poly mul_bary(const bary_poly& A, const bary_poly& B) {
+	bary_poly r; r.init(A.d+B.d);
+	for(int a1=0;a1<=A.d;++a1)
+		for(int b1=0;a1+b1<=A.d;++b1) {
+			if(A.c[a1][b1]==cx(0,0)) continue;
+			for(int a2=0;a2<=B.d;++a2)
+				for(int b2=0;a2+b2<=B.d;++b2)
+					r.c[a1+a2][b1+b2]+=A.c[a1][b1]*B.c[a2][b2];
+		}
+	return r;
+}
+
+// F restricted to the triangle (W0,W1,W2 for w, Z0,Z1,Z2 for z), as a
+// uniform degree-Dtotal homogeneous polynomial in (l0,l1,l2) -- a term
+// C[p][q]*w^p*z^q contributes C[p][q]*(l.W)^p*(l.Z)^q of degree p+q,
+// generally less than Dtotal, so needs degree elevation (multiply by
+// (l0+l1+l2)^(Dtotal-p-q), exactly 1 on the simplex) before accumulating
+// into a single uniform-degree grid.
+bary_poly compose_bipoly(const vector<vector<cx> >& C, int Dtotal,
+													cx W0,cx W1,cx W2, cx Z0,cx Z1,cx Z2) {
+	bary_poly acc; acc.init(Dtotal);
+	for(int p=0;p<(int)C.size();++p) {
+		for(int q=0;q<(int)C[p].size();++q) {
+			if(C[p][q]==cx(0,0)) continue;
+			bary_poly pw=pow_linear3(W0,W1,W2,p);
+			bary_poly pz=pow_linear3(Z0,Z1,Z2,q);
+			bary_poly term=mul_bary(pw,pz);
+			int termdeg=p+q;
+			if(termdeg<Dtotal) {
+				bary_poly elev=pow_linear3(cx(1,0),cx(1,0),cx(1,0),Dtotal-termdeg);
+				term=mul_bary(term,elev);
+			}
+			for(int a=0;a<=acc.d;++a)
+				for(int b=0;a+b<=acc.d;++b)
+					acc.c[a][b]+=C[p][q]*term.c[a][b];
+		}
+	}
+	return acc;
+}
+
+// A point in whichever chart is being used ((w,z) or (wr,zr)) -- the
+// recursion below works entirely in this space, matching
+// triangle_intersection's own domain.
+struct cpt { cx w,z; };
+cpt lerp_cpt(const cpt& p, const cpt& q) { cpt r; r.w=0.5*(p.w+q.w); r.z=0.5*(p.z+q.z); return r; }
+
+void bernstein_leaf_bounds(const vector<vector<cx> >& C, int Dtotal,
+														const cpt& P0, const cpt& P1, const cpt& P2,
+														double& reLo, double& reHi, double& imLo, double& imHi) {
+	bary_poly m=compose_bipoly(C,Dtotal,P0.w,P1.w,P2.w,P0.z,P1.z,P2.z);
+	reLo=1e300; reHi=-1e300; imLo=1e300; imHi=-1e300;
+	for(int a=0;a<=m.d;++a) {
+		for(int b=0;a+b<=m.d;++b) {
+			int cc=m.d-a-b;
+			cx beta=m.c[a][b]/multinom3(m.d,a,b,cc);
+			double re=beta.real(), im=beta.imag();
+			if(re<reLo) reLo=re; if(re>reHi) reHi=re;
+			if(im<imLo) imLo=im; if(im>imHi) imHi=im;
+		}
+	}
+}
+
+void get_subtriangle(int s, const cpt& P0,const cpt& P1,const cpt& P2,
+											const cpt& M01,const cpt& M12,const cpt& M20,
+											cpt& A, cpt& B, cpt& C) {
+	switch(s) {
+		case 0: A=P0;  B=M01; C=M20; break;
+		case 1: A=M01; B=P1;  C=M12; break;
+		case 2: A=M20; B=M12; C=P2;  break;
+		default: A=M01; B=M12; C=M20; break;
+	}
+}
+
+// Bernstein bounds for F restricted to the chart-triangle (P0,P1,P2),
+// optionally tightened by `level` rounds of 1-to-4 triangular subdivision
+// -- see riemann_pc2.cpp's own bernstein_bounds_recursive for the full
+// rationale (this is that function, generalized from a single 3-chart
+// homogeneous curve to a 2-chart (ordinary/corner) affine one).
+void bernstein_bounds_recursive(const vector<vector<cx> >& C, int Dtotal,
+																 const cpt& P0, const cpt& P1, const cpt& P2,
+																 int level, double& reLo, double& reHi, double& imLo, double& imHi) {
+	if(level<=0) { bernstein_leaf_bounds(C,Dtotal,P0,P1,P2,reLo,reHi,imLo,imHi); return; }
+	cpt M01=lerp_cpt(P0,P1), M12=lerp_cpt(P1,P2), M20=lerp_cpt(P2,P0);
+	reLo=1e300; reHi=-1e300; imLo=1e300; imHi=-1e300;
+	for(int s=0;s<4;++s) {
+		cpt A,B,C2; get_subtriangle(s,P0,P1,P2,M01,M12,M20,A,B,C2);
+		double srl,srh,sil,sih;
+		bernstein_bounds_recursive(C,Dtotal,A,B,C2,level-1,srl,srh,sil,sih);
+		if(srl<reLo) reLo=srl; if(srh>reHi) reHi=srh;
+		if(sil<imLo) imLo=sil; if(sih>imHi) imHi=sih;
+	}
+}
+
+// --bernstein-selftest: direct numerical verification, independent of the
+// mesh, that the level-0/level-1 enclosures actually contain the TRUE
+// range of Re(F_raw)/Im(F_raw) over a sample triangle (brute-force
+// sampled), and that level-1's box is a subset of level-0's. Exactly the
+// kind of check that caught riemann_pc2's chart-domain mismatch bug in
+// the first place -- kept as a real regression test, not a one-off.
+bool g_bernstein_selftest=false;
+
+void bernstein_selftest() {
+	cx W0(0.3,0.1), W1(0.9,-0.2), W2(-0.4,0.5);
+	cx Z0(-0.2,0.4), Z1(0.1,-0.3), Z2(0.6,0.2);
+	cpt P0,P1,P2; P0.w=W0; P0.z=Z0; P1.w=W1; P1.z=Z1; P2.w=W2; P2.z=Z2;
+
+	double l0Lo,l0Hi,i0Lo,i0Hi, l1Lo,l1Hi,i1Lo,i1Hi;
+	bernstein_bounds_recursive(g_Cord,g_Dord,P0,P1,P2,0,l0Lo,l0Hi,i0Lo,i0Hi);
+	bernstein_bounds_recursive(g_Cord,g_Dord,P0,P1,P2,1,l1Lo,l1Hi,i1Lo,i1Hi);
+
+	double trueReLo=1e300,trueReHi=-1e300,trueImLo=1e300,trueImHi=-1e300;
+	std::mt19937 rng(1);
+	std::uniform_real_distribution<double> ud(0.0,1.0);
+	int N=2000000;
+	for(int s=0;s<N;++s) {
+		double u=ud(rng), v=ud(rng);
+		if(u+v>1.0) { u=1.0-u; v=1.0-v; }
+		double L0=1.0-u-v, L1=u, L2=v;
+		cx w=L0*W0+L1*W1+L2*W2, z=L0*Z0+L1*Z1+L2*Z2;
+		cx val=F_raw(w,z);
+		double re=val.real(), im=val.imag();
+		if(re<trueReLo) trueReLo=re; if(re>trueReHi) trueReHi=re;
+		if(im<trueImLo) trueImLo=im; if(im>trueImHi) trueImHi=im;
+	}
+
+	cout<<"degree (ordinary chart): "<<g_Dord<<endl;
+	cout<<"level 0 box:  Re["<<l0Lo<<","<<l0Hi<<"]  Im["<<i0Lo<<","<<i0Hi<<"]"<<endl;
+	cout<<"level 1 box:  Re["<<l1Lo<<","<<l1Hi<<"]  Im["<<i1Lo<<","<<i1Hi<<"]"<<endl;
+	cout<<"true range (brute force, "<<N<<" samples): Re["<<trueReLo<<","<<trueReHi
+			<<"]  Im["<<trueImLo<<","<<trueImHi<<"]"<<endl;
+
+	bool ok=true;
+	if(!(l0Lo<=trueReLo+1e-9 && l0Hi>=trueReHi-1e-9)) { cout<<"FAIL: level-0 Re doesn't enclose true range"<<endl; ok=false; }
+	if(!(i0Lo<=trueImLo+1e-9 && i0Hi>=trueImHi-1e-9)) { cout<<"FAIL: level-0 Im doesn't enclose true range"<<endl; ok=false; }
+	if(!(l1Lo<=trueReLo+1e-9 && l1Hi>=trueReHi-1e-9)) { cout<<"FAIL: level-1 Re doesn't enclose true range"<<endl; ok=false; }
+	if(!(i1Lo<=trueImLo+1e-9 && i1Hi>=trueImHi-1e-9)) { cout<<"FAIL: level-1 Im doesn't enclose true range"<<endl; ok=false; }
+	if(!(l1Lo>=l0Lo-1e-9 && l1Hi<=l0Hi+1e-9)) { cout<<"FAIL: level-1 Re box is not a subset of level-0's"<<endl; ok=false; }
+	if(!(i1Lo>=i0Lo-1e-9 && i1Hi<=i0Hi+1e-9)) { cout<<"FAIL: level-1 Im box is not a subset of level-0's"<<endl; ok=false; }
+	cout<<(ok?"ALL CHECKS PASSED":"CHECKS FAILED")<<endl;
+}
+
+void compute_bernstein_bounds(T& t, Simplex(T,2) tri) {
+	extra_data<2>* d=attr(t,tri);
+	if(d->bernstein_computed) return;
+	d->bernstein_computed=true;
+
+	vgtl::array<Vertex(T),3> vs;
+	vertices(t,tri,vs);
+	cx w0,w1,w2,z0,z1,z2;
+	bool far=triangle_chart_coords(t,vs,w0,w1,w2,z0,z1,z2);
+	const vector<vector<cx> >& C = far ? g_Ccorner : g_Cord;
+	int Dtotal = far ? g_Dcorner : g_Dord;
+
+	cpt P0,P1,P2; P0.w=w0; P0.z=z0; P1.w=w1; P1.z=z1; P2.w=w2; P2.z=z2;
+	double reLo,reHi,imLo,imHi;
+	bernstein_bounds_recursive(C,Dtotal,P0,P1,P2,g_bernstein_level,reLo,reHi,imLo,imHi);
+	// Round outward (one float ULP) so the cached box stays a superset of
+	// the double-precision enclosure -- see root_data's own comment for
+	// why float storage is safe here.
+	d->reLo=nextafterf((float)reLo,-numeric_limits<float>::infinity());
+	d->reHi=nextafterf((float)reHi, numeric_limits<float>::infinity());
+	d->imLo=nextafterf((float)imLo,-numeric_limits<float>::infinity());
+	d->imHi=nextafterf((float)imHi, numeric_limits<float>::infinity());
+}
+
+bool triangle_maybe_zero(T& t, Simplex(T,2) tri) {
+	compute_bernstein_bounds(t,tri);
+	const extra_data<2>* d=attr(t,tri);
+	return d->reLo<=0 && d->reHi>=0 && d->imLo<=0 && d->imHi>=0;
+}
+
+long g_bernstein_pruned_faces=0; // diagnostic: triangles Newton never had to touch
+
+// Priority for --bernstein mode: the widest candidate-face box among the
+// cell's 10 triangular faces that can't be ruled out, normalized by the
+// cell's own diameter (a raw box shrinks roughly linearly with cell size,
+// so comparing it directly against one fixed --threshold across levels
+// would conflate "still large" with "genuinely needs more refinement"),
+// or -1 (certified empty -- drop this cell, never refine it again) if
+// none of the 10 faces can contain a zero.
+double cell_priority_bernstein(T& t, Cell(T) cv) {
+	double best=-1.0;
+	for(int j=0;j<=DIM;++j) {
+		Simplex(T,3) tet=face_op(t,cv,j);
+		for(int k=0;k<=3;++k) {
+			Simplex(T,2) tri=face_op(t,tet,k);
+			if(triangle_maybe_zero(t,tri)) {
+				const extra_data<2>* d=attr(t,tri);
+				double w=(d->reHi-d->reLo)+(d->imHi-d->imLo);
+				if(w>best) best=w;
+			}
+		}
+	}
+	if(best>=0) {
+		vgtl::array<Vertex(T),DIM+1> vs;
+		vertices(t,cv,vs);
+		double diam=cell_diam(t,vs);
+		if(diam>1e-12) best/=diam;
+		if(g_proximity) best*=proximity_factor(t,vs);
+	}
+	return best;
+}
+
 // Finds where F=0 crosses a 2-simplex: up to two points, since F has
 // degree n in w and a triangle's w-span can in principle still contain
 // more than one root even after refinement (the discriminant-based
@@ -711,49 +1108,20 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 	vgtl::array<Vertex(T),3> vs;
 	vertices(t,tri,vs);
 
-	// Which chart this triangle needs. F is monic in w, so at the exact
-	// point z=infty every root w is also infinite -- but w and z don't
-	// reach the *same* fixed FAR_W_CUTOFF at the same point along the
-	// curve unless w grows linearly in z: e.g. on the parabola
-	// w^2=z, |w|~sqrt(|z|), so z crosses the cutoff while w is still
-	// only ~sqrt(FAR_W_CUTOFF) -- a real, curve-traversed band near the
-	// corner where exactly one of the two is "far". The old code treated
-	// w_far!=z_far as the (literally-at-infinity-only) region "w far,
-	// z finite" the surface never visits, and excluded it outright --
-	// silently dropping that entire band (confirmed: the excluded-triangle
-	// count *grows* with refinement depth instead of shrinking, since
-	// finer triangles sample more of the band). Fix: use the corner chart
-	// whenever *either* is far, not only when both are. This costs
-	// nothing extra for a truly-empty triangle (Newton just finds no
-	// root there, same outcome as the old exclusion) and is exact where
-	// the curve actually passes through this band, since K(wr,zr) is a
-	// valid chart (1/w, 1/z are finite and well-conditioned) whether or
-	// not the *other* coordinate happens to be large too.
-	bool w_far=false, z_far=false;
-	for(int k=0;k<3;++k) {
-		if(sphere_is_far(w_sphere(t,vs[k]))) w_far=true;
-		if(sphere_is_far(z_sphere(t,vs[k]))) z_far=true;
+	// Which chart this triangle needs -- see triangle_chart_coords's own
+	// comment (shared verbatim with compute_bernstein_bounds above) for
+	// why "either far" rather than "both far".
+	cx w0,w1,w2,z0,z1,z2; // either the ordinary (w,z) chart, or (wr,zr)
+	bool far=triangle_chart_coords(t,vs,w0,w1,w2,z0,z1,z2);
+
+	if(g_bernstein && !triangle_maybe_zero(t,tri)) {
+		++g_bernstein_pruned_faces; // certified empty: Newton never had to run here
+		return;
 	}
 
-	cx w0,w1,w2,z0,z1,z2; // either the ordinary (w,z) chart, or (wr,zr)
 	cxfun2 Ffun,Fwfun,Fzfun;
-	if(w_far||z_far) {
-		w0=to_wr(recip_from_sphere(w_sphere(t,vs[0])));
-		w1=to_wr(recip_from_sphere(w_sphere(t,vs[1])));
-		w2=to_wr(recip_from_sphere(w_sphere(t,vs[2])));
-		z0=to_zr(recip_from_sphere(z_sphere(t,vs[0])));
-		z1=to_zr(recip_from_sphere(z_sphere(t,vs[1])));
-		z2=to_zr(recip_from_sphere(z_sphere(t,vs[2])));
-		Ffun=F_corner; Fwfun=Fwr_corner; Fzfun=Fzr_corner;
-	} else {
-		w0=from_sphere(w_sphere(t,vs[0]));
-		w1=from_sphere(w_sphere(t,vs[1]));
-		w2=from_sphere(w_sphere(t,vs[2]));
-		z0=from_sphere(z_sphere(t,vs[0]));
-		z1=from_sphere(z_sphere(t,vs[1]));
-		z2=from_sphere(z_sphere(t,vs[2]));
-		Ffun=F; Fwfun=Fw; Fzfun=Fz;
-	}
+	if(far) { Ffun=F_corner; Fwfun=Fwr_corner; Fzfun=Fzr_corner; }
+	else    { Ffun=F; Fwfun=Fw; Fzfun=Fz; }
 
 	double seeds[8][2]; int nseeds=0;
 	{
@@ -775,46 +1143,59 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 	tri_frame fr;
 	{ cx w3[3]={w0,w1,w2}, z3[3]={z0,z1,z2}; build_tri_frame(w3,z3,fr); }
 
-	for(int s=0; s<nseeds && d->nroots<2; ++s) {
+	// Found roots stay in local temporaries until the final count is
+	// known, then get pushed as one contiguous run into g_roots below
+	// (see extra_data<2>::root_idx) -- the pooled-storage technique
+	// ported from riemann_pc2.cpp.
+	double tmpl1[2],tmpl2[2]; cx tmpw[2],tmpz[2]; int nfound=0;
+	for(int s=0; s<nseeds && nfound<2; ++s) {
 		double sx,sy; bary_to_xy(fr,seeds[s][0],seeds[s][1],sx,sy);
 		double ol1,ol2;
 		if(!newton_on_triangle(fr,sx,sy,ol1,ol2,Ffun,Fwfun,Fzfun)) continue;
 		bool dup=false;
-		for(int r=0;r<d->nroots;++r)
-			if(fabs(d->l1[r]-ol1)<1e-7 && fabs(d->l2[r]-ol2)<1e-7) dup=true;
+		for(int r=0;r<nfound;++r)
+			if(fabs(tmpl1[r]-ol1)<1e-7 && fabs(tmpl2[r]-ol2)<1e-7) dup=true;
 		if(dup) continue;
 		double ol0=1.0-ol1-ol2;
-		int r=d->nroots;
-		d->l1[r]=ol1; d->l2[r]=ol2;
-		if(w_far||z_far) {
+		int r=nfound;
+		tmpl1[r]=ol1; tmpl2[r]=ol2;
+		if(far) {
 			// The root was found in (wr,zr); convert back to an ordinary
 			// (possibly huge but finite) (w,z) point for downstream code
 			// (crossing-node identity itself only ever uses l1,l2, which
 			// are already chart-independent).
 			cx wr_pt=ol0*w0+ol1*w1+ol2*w2;
 			cx zr_pt=ol0*z0+ol1*z1+ol2*z2;
-			d->w_pt[r]=from_wr(wr_pt);
-			d->z_pt[r]=from_zr(zr_pt);
+			tmpw[r]=from_wr(wr_pt);
+			tmpz[r]=from_zr(zr_pt);
 		} else {
-			d->w_pt[r]=ol0*w0+ol1*w1+ol2*w2;
-			d->z_pt[r]=ol0*z0+ol1*z1+ol2*z2;
+			tmpw[r]=ol0*w0+ol1*w1+ol2*w2;
+			tmpz[r]=ol0*z0+ol1*z1+ol2*z2;
 		}
-		++d->nroots;
+		++nfound;
+	}
+	d->nroots=(unsigned char)nfound;
+	if(nfound>0) {
+		d->root_idx=(int)g_roots.size();
+		for(int r=0;r<nfound;++r) {
+			root_data rd; rd.w=narrowc(tmpw[r]); rd.z=narrowc(tmpz[r]); rd.l1=tmpl1[r]; rd.l2=tmpl2[r];
+			g_roots.push_back(rd);
+		}
 	}
 }
 
 int triangle_nroots(const T& t, Simplex(T,2) tri) { return attr(t,tri)->nroots; }
 
 void triangle_point(const T& t, Simplex(T,2) tri, int r, cx& w, cx& z) {
-	const extra_data<2>* d=attr(t,tri);
-	w=d->w_pt[r]; z=d->z_pt[r];
+	const root_data& rd=g_roots[attr(t,tri)->root_idx+r];
+	w=widenc(rd.w); z=widenc(rd.z);
 }
 
 // Barycentric coordinates of root r of an already-computed triangle
 // (l0=1-l1-l2).
 void triangle_bary(const T& t, Simplex(T,2) tri, int r, double& l0, double& l1, double& l2) {
-	const extra_data<2>* d=attr(t,tri);
-	l1=d->l1[r]; l2=d->l2[r]; l0=1.0-l1-l2;
+	const root_data& rd=g_roots[attr(t,tri)->root_idx+r];
+	l1=rd.l1; l2=rd.l2; l0=1.0-l1-l2;
 }
 
 // A crossing point's identity: which mesh element it sits at, purely
@@ -1026,6 +1407,14 @@ int main(int argc, char* argv[]) {
 			g_onion_scale=atof(argv[++i]);
 		} else if(arg=="--cutoff" && i+1<argc) {
 			g_cutoff=atof(argv[++i]);
+		} else if(arg=="--proximity") {
+			g_proximity=true;
+		} else if(arg=="--bernstein") {
+			g_bernstein=true;
+		} else if(arg=="--bernstein-level" && i+1<argc) {
+			g_bernstein=true; g_bernstein_level=atoi(argv[++i]);
+		} else if(arg=="--bernstein-selftest") {
+			g_bernstein_selftest=true;
 		} else if(arg=="--list-functions") {
 			cout<<"available functions:"<<endl;
 			print_function_catalog(cout);
@@ -1033,7 +1422,8 @@ int main(int argc, char* argv[]) {
 		} else {
 			cerr<<"unrecognized argument: "<<arg<<endl;
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--generic] [--generic-seed N] [--depth N] "
-					<<"[--threshold X] [--onion] [--onion-scale X] [--cutoff X] [--list-functions]"<<endl;
+					<<"[--threshold X] [--onion] [--onion-scale X] [--cutoff X] [--proximity] "
+					<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--list-functions]"<<endl;
 			return 1;
 		}
 	}
@@ -1084,12 +1474,23 @@ int main(int argc, char* argv[]) {
 		int deg=(int)g_F.c[i].size()-1;
 		if(deg>g_dz) g_dz=deg;
 	}
+	build_coefficient_grids();
+
+	if(g_bernstein_selftest) {
+		bernstein_selftest();
+		return 0;
+	}
+
 	cout<<"function: "<<function_index<<" ("<<catalog[function_index].name<<") -- "
 			<<catalog[function_index].description<<endl;
 	cout<<"coordinates: "<<(g_generic_coords?"generic (rotated+translated)":"aligned (original)");
 	if(g_generic_coords) cout<<" (seed="<<g_generic_seed<<")";
 	cout<<endl;
-	cout<<"max_depth="<<max_depth<<" threshold="<<threshold<<endl;
+	cout<<"max_depth="<<max_depth<<" threshold="<<threshold
+			<<"  proximity="<<(g_proximity?"on":"off")
+			<<"  bernstein="<<(g_bernstein?"on":"off");
+	if(g_bernstein) cout<<" (level="<<g_bernstein_level<<")";
+	cout<<endl;
 	cout<<"projection: "<<(g_onion?"onion":"flat");
 	if(g_onion) cout<<" (scale="<<g_onion_scale<<")";
 	cout<<endl;
@@ -1110,8 +1511,6 @@ int main(int argc, char* argv[]) {
 			Vertex(T) v=add(t);
 			w_sphere_set(t,v, g_generic_coords ? g_rot_w.apply(label_sphere(wl)) : label_sphere(wl));
 			z_sphere_set(t,v, g_generic_coords ? g_rot_z.apply(label_sphere(zl)) : label_sphere(zl));
-			w_label_set(t,v,wl);
-			z_label_set(t,v,zl);
 			compute_vertex_data(t,v);
 			V[wl][zl]=v;
 		}
@@ -1236,10 +1635,15 @@ int main(int argc, char* argv[]) {
 	cout<<endl<<"--- adaptive refinement ---"<<endl;
 
 	priority_queue<pair<double,Cell(T)> > pq;
+	int ndropped=0;
 	{
 		Cell_it(T) ci,cend;
-		for(simplices(t,ci,cend); ci!=cend; ++ci)
-			if(is_current(t,*ci)) pq.push(make_pair(cell_priority(t,*ci),*ci));
+		for(simplices(t,ci,cend); ci!=cend; ++ci) {
+			if(!is_current(t,*ci)) continue;
+			double p=g_bernstein ? cell_priority_bernstein(t,*ci) : cell_priority(t,*ci);
+			if(g_bernstein && p<0) { ++ndropped; continue; } // certified empty
+			pq.push(make_pair(p,*ci));
+		}
 	}
 
 	int nsubdivisions=0;
@@ -1252,11 +1656,16 @@ int main(int argc, char* argv[]) {
 		refine_app app;
 		maubach_subdivide(t,cv,app);
 		++nsubdivisions;
-		for(size_t i=0;i<app.new_cells.size();++i)
-			pq.push(make_pair(cell_priority(t,app.new_cells[i]),app.new_cells[i]));
+		for(size_t i=0;i<app.new_cells.size();++i) {
+			Cell(T) nc=app.new_cells[i];
+			double p=g_bernstein ? cell_priority_bernstein(t,nc) : cell_priority(t,nc);
+			if(g_bernstein && p<0) { ++ndropped; continue; }
+			pq.push(make_pair(p,nc));
+		}
 	}
 
 	cout<<"subdivisions performed: "<<nsubdivisions<<endl;
+	if(g_bernstein) cout<<"cells certified empty (dropped, never refined): "<<ndropped<<endl;
 
 	int nv2=0,n42=0;
 	double tmin=1e300,tmax=0;
@@ -1527,6 +1936,8 @@ int main(int argc, char* argv[]) {
 	cout<<"wrote "<<obj_path<<": "<<obj.nverts<<" vertices, "<<obj.nfaces<<" faces "
 			<<"(projection: "<<(g_onion?"onion, z on S^2 + radial w":"Re(w), Im(w), Re(z)")<<")"<<endl;
 	if(obj.nclipped) cout<<"polygons dropped by --cutoff: "<<obj.nclipped<<endl;
+	if(g_bernstein) cout<<"triangles Bernstein-pruned (Newton skipped, certified no root): "
+			<<g_bernstein_pruned_faces<<endl;
 	cout<<"|F|^2 residual at extracted nodes, range: ["<<fres_min<<", "<<fres_max<<"]"<<endl;
 
 	cout<<"ok/bad cells by cell level:"<<endl;

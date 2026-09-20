@@ -297,7 +297,13 @@ from adjacent 4-simplices -- see *Known limitations*).
   are append-only -- Maubach subdivision marks parent cells
   not-current rather than freeing them -- so deep runs can exhaust
   memory (observed: `--depth 16` needs several GB; see *Usage* for
-  numbers). No compaction/GC exists yet.
+  numbers). No compaction/GC of the mesh itself exists yet, but the
+  per-vertex/per-triangle auxiliary caches were shrunk (dead `fw`/`fz`/
+  `w_label`/`z_label` fields removed, the 2-root Newton cache moved out
+  of `extra_data<2>` into a flat pool, matching the memory work done in
+  `examples/top/riemann_PC2/riemann_pc2.cpp`) -- measured ~52% lower
+  peak RSS at the same `--depth`/`--threshold`, same extraction result,
+  with no other flags involved.
 - **`branch_gap` is an order-of-magnitude proxy for `n>2`.** It's the
   `n(n-1)`-th root of the resultant, which is exact for a single pair
   of roots (`n=2`) but is a product over *all* pairs for `n>2`, not
@@ -308,8 +314,13 @@ from adjacent 4-simplices -- see *Known limitations*).
 Build (no project file yet; plain g++ against the VGTL headers):
 
 ```sh
-g++ -I ../../../include -std=c++03 -O2 riemann.cpp -o riemann
+g++ -I ../../../include -std=c++17 -O2 riemann.cpp -o riemann
 ```
+
+(the `--generic`/`--generic-seed` rotation already needed `<random>`'s
+`std::mt19937`, i.e. at least C++11, before this; `-std=c++03` as
+originally documented here no longer builds at all on a current
+toolchain.)
 
 (from `examples/top/riemann/`; adjust the include path if run from
 elsewhere -- it must point at VGTL's top-level `include/` directory).
@@ -317,18 +328,23 @@ elsewhere -- it must point at VGTL's top-level `include/` directory).
 Run:
 
 ```sh
-./riemann [--function N] [--generic] [--depth N] [--threshold X] [--onion] [--onion-scale X] [--cutoff X] [--list-functions]
+./riemann [--function N] [--generic] [--generic-seed N] [--depth N] [--threshold X] [--onion] [--onion-scale X] [--cutoff X] [--proximity] [--bernstein] [--bernstein-level N] [--bernstein-selftest] [--list-functions]
 ```
 
 | flag | default | meaning |
 |---|---|---|
 | `--function N` | `0` | index into the curve catalog (see below) |
-| `--generic` | off | apply a fixed complex-affine change of coordinates to `F` (rotation + translation, `\|a\|=\|c\|=1`) to break curve/mesh symmetry alignment -- see *Known limitations* |
+| `--generic` | off | apply a random rotation to the seed octahedron's own vertex placement (independently for `w` and `z`) to break curve/mesh symmetry alignment -- see *Known limitations* |
+| `--generic-seed N` | `12345` | implies `--generic`; picks which random rotation |
 | `--depth N` | `12` | maximum Maubach subdivision level |
 | `--threshold X` | `0.1` | refinement stops popping cells once the priority queue's max drops below this |
 | `--onion` | off | export via the onion projection (nested spheres) instead of the flat `(Re w, Im w, Re z)` one -- see Phase 4 |
 | `--onion-scale X` | `0.3` | radial spread for `--onion`; output radius stays within `[1-X, 1+X]` |
 | `--cutoff X` | off | drop any extracted polygon with a vertex farther than `X` from the origin in the projected 3D point -- keeps pole-proxy outliers from blowing out the flat projection's bounding box; ignored under `--onion`, where the radius is already `~1` by construction |
+| `--proximity` | off | weight `cell_priority` by `diam/(mind+diam)` (`mind` = a first-order distance-to-curve estimate at the cell's own vertices) to bias refinement toward the curve itself -- ported from `riemann_pc2.cpp`; cuts subdivisions/final cell count without changing the bad-cell rate |
+| `--bernstein` | off | use a certified Bernstein-Bezier enclosure of `F` over each 2-simplex, instead of `branch_gap`, both to PRUNE cells that provably can't contain a crossing (dropped forever, never refined again) and to rank the survivors -- ported from `riemann_pc2.cpp` |
+| `--bernstein-level N` | `0` | implies `--bernstein`; rounds of 1-to-4 triangular subdivision used to tighten the certified enclosure before caching it |
+| `--bernstein-selftest` | -- | brute-force-verify the Bernstein enclosure machinery against a sample triangle (independent of the mesh/curve catalog) and exit |
 | `--list-functions` | -- | print the curve catalog and exit |
 
 Output is `riemann_surface_<name>[_generic][_onion].obj` in the working
