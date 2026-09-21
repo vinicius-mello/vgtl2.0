@@ -709,6 +709,56 @@ void bernstein_bounds_recursive(const poly_F3& F, int chart, const cpt& P0, cons
 	}
 }
 
+// A certified fallback seed for triangle_intersection's Newton search --
+// ported from examples/top/riemann/riemann.cpp, see that file's own
+// comment on this same pair of functions for the full rationale and the
+// measurements that motivated it (root-finding coverage on rare
+// near-branch-point triangles, without multiplying cost on the vast
+// majority of triangles that have no root at all). Only tried when the
+// fixed/dynamic seeds below all miss: descend the same 1-to-4
+// subdivision bernstein_bounds_recursive uses, following any
+// sub-triangle whose own enclosure still straddles 0 in both Re and Im,
+// carrying the corresponding barycentric corners (relative to the
+// ORIGINAL, undivided triangle) in lockstep, and return the leaf's own
+// centroid as a certified-plausible seed.
+struct bary3 { double l[3]; };
+bary3 lerp_bary3(const bary3& a, const bary3& b) {
+	bary3 r; for(int i=0;i<3;++i) r.l[i]=0.5*(a.l[i]+b.l[i]); return r;
+}
+void get_subtriangle_bary3(int s, const bary3& P0,const bary3& P1,const bary3& P2,
+														const bary3& M01,const bary3& M12,const bary3& M20,
+														bary3& A, bary3& B, bary3& C) {
+	switch(s) {
+		case 0: A=P0;  B=M01; C=M20; break;
+		case 1: A=M01; B=P1;  C=M12; break;
+		case 2: A=M20; B=M12; C=P2;  break;
+		default: A=M01; B=M12; C=M20; break;
+	}
+}
+bool bernstein_locate_root(const poly_F3& F, int chart,
+														const cpt& P0, const cpt& P1, const cpt& P2,
+														const bary3& B0, const bary3& B1, const bary3& B2,
+														int level, double& out_l1, double& out_l2) {
+	double reLo,reHi,imLo,imHi;
+	bernstein_leaf_bounds(F,chart,P0,P1,P2,reLo,reHi,imLo,imHi);
+	if(!(reLo<=0 && reHi>=0 && imLo<=0 && imHi>=0)) return false; // certified empty here
+	if(level<=0) {
+		out_l1=(B0.l[1]+B1.l[1]+B2.l[1])/3.0;
+		out_l2=(B0.l[2]+B1.l[2]+B2.l[2])/3.0;
+		return true;
+	}
+	cpt M01=lerp_cpt(P0,P1), M12=lerp_cpt(P1,P2), M20=lerp_cpt(P2,P0);
+	bary3 N01=lerp_bary3(B0,B1), N12=lerp_bary3(B1,B2), N20=lerp_bary3(B2,B0);
+	for(int s=0;s<4;++s) {
+		cpt A,Bp,Cp; get_subtriangle(s,P0,P1,P2,M01,M12,M20,A,Bp,Cp);
+		bary3 Ab,Bb,Cb; get_subtriangle_bary3(s,B0,B1,B2,N01,N12,N20,Ab,Bb,Cb);
+		if(bernstein_locate_root(F,chart,A,Bp,Cp,Ab,Bb,Cb,level-1,out_l1,out_l2)) return true;
+	}
+	return false; // extremely rare: level ran out before any leaf confirmed
+}
+const int BFALLBACK_LEVEL=6; // narrows the seed to within 2^-6 of the triangle's own size
+long long g_bfallback_tried=0, g_bfallback_new_root=0; // diagnostic
+
 // --bernstein-selftest: direct numerical verification, independent of
 // the mesh, that (a) level-0 and level-1 enclosures both actually
 // contain the TRUE range of Re(F)/Im(F) over the triangle's own CHART
@@ -1037,7 +1087,15 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 		default: Ffun=F_chart2; Fwfun=Fa_chart2; Fzfun=Fb_chart2; break;
 	}
 
-	double seeds[8][2]; int nseeds=0;
+	// Seed count/placement reduced to match examples/top/riemann/riemann.cpp
+	// -- see that file's comment on this same array for the measurement
+	// (per-seed-kind instrumentation on the parabola/elliptic curves
+	// there): the 3 near-edge-midpoint seeds never found a genuinely new
+	// root in any of the runs tested, for ~38% of all Newton calls;
+	// bernstein_locate_root below covers the rare cases they used to
+	// (rarely) catch, more robustly. Not independently re-measured on
+	// this file's own CP^2 curves.
+	double seeds[5][2]; int nseeds=0;
 	{
 		cx F0=Ffun(w0,z0), F1=Ffun(w1,z1), F2=Ffun(w2,z2);
 		cx a1=F1-F0, a2=F2-F0;
@@ -1049,10 +1107,10 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 			++nseeds;
 		}
 	}
-	static const double extra_seeds[7][2]={
-		{1/3.,1/3.},{0.1,0.1},{0.8,0.1},{0.1,0.8},{0.45,0.1},{0.1,0.45},{0.45,0.45}
+	static const double extra_seeds[4][2]={
+		{1/3.,1/3.},{0.1,0.1},{0.8,0.1},{0.1,0.8}
 	};
-	for(int s=0;s<7;++s) { seeds[nseeds][0]=extra_seeds[s][0]; seeds[nseeds][1]=extra_seeds[s][1]; ++nseeds; }
+	for(int s=0;s<4;++s) { seeds[nseeds][0]=extra_seeds[s][0]; seeds[nseeds][1]=extra_seeds[s][1]; ++nseeds; }
 
 	tri_frame fr;
 	{ cx w3[3]={w0,w1,w2}, z3[3]={z0,z1,z2}; build_tri_frame(w3,z3,fr); }
@@ -1078,6 +1136,33 @@ triangle_intersection(T& t, Simplex(T,2) tri) {
 		++nfound;
 		g_resid_F.push_back(rF); g_resid_geom.push_back(rG); g_resid_iters.push_back(riter);
 	}
+
+	// Certified fallback (see bernstein_locate_root's own comment): only
+	// tried when every fixed/dynamic seed above missed entirely.
+	if(nfound==0) {
+		++g_bfallback_tried;
+		cpt P0,P1,P2; P0.a=w0; P0.b=z0; P1.a=w1; P1.b=z1; P2.a=w2; P2.b=z2;
+		bary3 B0,B1,B2;
+		B0.l[0]=1; B0.l[1]=0; B0.l[2]=0;
+		B1.l[0]=0; B1.l[1]=1; B1.l[2]=0;
+		B2.l[0]=0; B2.l[1]=0; B2.l[2]=1;
+		double bl1,bl2;
+		if(bernstein_locate_root(g_F,chart,P0,P1,P2,B0,B1,B2,BFALLBACK_LEVEL,bl1,bl2)) {
+			double sx,sy; bary_to_xy(fr,bl1,bl2,sx,sy);
+			double ol1,ol2,rF,rG; int riter;
+			if(newton_on_triangle(fr,sx,sy,ol1,ol2,Ffun,Fwfun,Fzfun,rF,rG,riter)) {
+				++g_bfallback_new_root;
+				double ol0=1.0-ol1-ol2;
+				int r=nfound;
+				tmpl1[r]=ol1; tmpl2[r]=ol2;
+				cx aroot=ol0*w0+ol1*w1+ol2*w2, broot=ol0*z0+ol1*z1+ol2*z2;
+				tmppt[r]=rehomogenize(chart,aroot,broot);
+				++nfound;
+				g_resid_F.push_back(rF); g_resid_geom.push_back(rG); g_resid_iters.push_back(riter);
+			}
+		}
+	}
+
 	d->nroots=(unsigned char)nfound;
 	if(nfound>0) {
 		d->root_idx=(int)g_roots.size();
@@ -1597,6 +1682,8 @@ int main(int argc, char* argv[]) {
 	for(int sz=3; sz<8; ++sz) if(npoly_out[sz]) cout<<" "<<sz<<"-gon="<<npoly_out[sz];
 	cout<<endl;
 	cout<<"touching tetrahedra: "<<ntouching_tets<<"  unhandled node count: "<<nbad_tets<<endl;
+	cout<<"Bernstein fallback seeds used: "<<g_bfallback_tried<<" triangles tried, "
+			<<g_bfallback_new_root<<" found a root the fixed/dynamic seeds missed"<<endl;
 	cout<<"wrote "<<obj_path<<": "<<obj.nverts<<" vertices, "<<obj.nfaces<<" faces"<<endl;
 	if(obj.nclipped) cout<<"polygons dropped by --cutoff: "<<obj.nclipped<<endl;
 	if(g_bernstein) cout<<"triangles Bernstein-pruned (Newton skipped, certified no root): "
