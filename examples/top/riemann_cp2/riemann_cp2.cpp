@@ -1292,6 +1292,7 @@ same_crossing_node(const crossing_node& a, const crossing_node& b) {
 double g_cutoff=1e300;
 bool g_onion=false;
 double g_onion_scale=0.5;
+bool g_alpha_projection=false;
 
 vec<3,double> to_sphere(cx w) {
 	double n=std::norm(w);
@@ -1328,7 +1329,36 @@ int pick_chart_polygon(const vector<crossing_node>& nodes, const vector<int>& cy
 	return chart;
 }
 
+// --alpha-projection: Dutter, "Visualization of Complex Projective
+// Curves" (arXiv:2608.04323), attributing the map itself to S. Kranich
+// (2015) -- alpha-tilde([X:Y:Z]) = (|X|^2/S, conj(X)*Y/S), identifying
+// the second (complex) output coordinate with (Re,Im) to land in R^3,
+// S=|X|^2+|Y|^2+|Z|^2. Unlike flat/onion, this needs no chart choice at
+// all: it's a function of the homogeneous point ITSELF (the paper
+// proves it continuous on all of P^2_C, X=0 included -- X appears
+// directly above, never as a denominator), so pick_chart_polygon's
+// whole "which affine chart" question -- and the bug class that came
+// from getting it wrong (see project_for_viz's own onion-mode history
+// just above) -- doesn't apply here by construction. Bounded by
+// construction too (image is the closed ball of radius 1/2 centered at
+// (1/2,0,0)), so no --cutoff needed, same as onion. Not injective --
+// alpha(u,v)=alpha(u',v') exactly when (u',v')=lambda*(u,v) for a UNIT
+// COMPLEX lambda (an overall phase), which is the one degree of
+// freedom this projection cannot see -- but that's strictly less
+// information thrown away than flat's (which drops Im(b), an entire
+// real dimension, outright).
+vec<3,double> alpha_projection(const pt3& p) {
+	double S=std::norm(p[0])+std::norm(p[1])+std::norm(p[2]);
+	cx xy=std::conj(p[0])*p[1];
+	vec<3,double> out;
+	out[0]=std::norm(p[0])/S;
+	out[1]=xy.real()/S;
+	out[2]=xy.imag()/S;
+	return out;
+}
+
 vec<3,double> project_for_viz(const pt3& p, int chart) {
+	if(g_alpha_projection) return alpha_projection(p);
 	if(g_onion) {
 		// FOUND AND FIXED A THIRD TIME (same session, user again: "de novo
 		// só vemos um hemisfério"): the previous version used 'a' from
@@ -1375,20 +1405,26 @@ struct obj_writer {
 	ofstream out;
 	int nverts, nfaces, nclipped;
 	obj_writer(const char* path) : out(path), nverts(0), nfaces(0), nclipped(0) {
-		if(g_onion)
+		if(g_alpha_projection)
+			out<<"# Riemann surface (CP^2 approach) extraction, alpha projection "
+					<<"(Dutter, arXiv:2608.04323, after Kranich 2015): "
+					<<"(|X|^2/S, Re(conj(X)Y)/S, Im(conj(X)Y)/S), S=|X|^2+|Y|^2+|Z|^2\n";
+		else if(g_onion)
 			out<<"# Riemann surface (CP^2 approach) extraction, onion projection: "
 					<<"direction=Z/X on S^2, radius=1+"<<g_onion_scale<<"*|Y|\n";
 		else
 			out<<"# Riemann surface (CP^2 approach) extraction, projected via "
 					<<"per-point best affine chart (Re a, Im a, Re b)\n";
-		if(!g_onion && g_cutoff<1e299)
+		if(!g_onion && !g_alpha_projection && g_cutoff<1e299)
 			out<<"# cutoff: polygons with a vertex farther than "<<g_cutoff<<" from the origin dropped\n";
 	}
 	void write_polygon(const vector<crossing_node>& nodes, const vector<int>& cyc) {
-		int chart=g_onion ? 0 : pick_chart_polygon(nodes,cyc); // onion no longer uses chart at all (fixed Z/X ratio, see project_for_viz)
+		// alpha, like onion, is a function of the homogeneous point itself --
+		// no chart to pick (see alpha_projection's own comment).
+		int chart=(g_onion || g_alpha_projection) ? 0 : pick_chart_polygon(nodes,cyc);
 		vector<vec<3,double> > pts(cyc.size());
 		for(size_t i=0;i<cyc.size();++i) pts[i]=project_for_viz(nodes[cyc[i]].p,chart);
-		if(!g_onion) {
+		if(!g_onion && !g_alpha_projection) {
 			for(size_t i=0;i<pts.size();++i) {
 				double dd=sqrt(pts[i][0]*pts[i][0]+pts[i][1]*pts[i][1]+pts[i][2]*pts[i][2]);
 				if(dd>g_cutoff) { ++nclipped; return; }
@@ -1423,6 +1459,8 @@ int main(int argc, char* argv[]) {
 			g_onion=true;
 		} else if(arg=="--onion-scale" && i+1<argc) {
 			g_onion_scale=atof(argv[++i]);
+		} else if(arg=="--alpha-projection") {
+			g_alpha_projection=true;
 		} else if(arg=="--proximity") {
 			g_proximity=true;
 		} else if(arg=="--generic") {
@@ -1442,11 +1480,16 @@ int main(int argc, char* argv[]) {
 		} else {
 			cerr<<"unrecognized argument: "<<arg<<endl;
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] "
-					<<"[--cutoff X] [--onion] [--onion-scale X] [--proximity] "
+					<<"[--cutoff X] [--onion] [--onion-scale X] [--alpha-projection] [--proximity] "
 					<<"[--generic] [--generic-seed N] [--bernstein] [--bernstein-level N] "
 					<<"[--list-functions]"<<endl;
 			return 1;
 		}
+	}
+
+	if(g_onion && g_alpha_projection) {
+		cerr<<"--onion and --alpha-projection are two different projections; pick one"<<endl;
+		return 1;
 	}
 
 	vector<catalog_entry_cp2>& catalog=function_catalog_cp2();
@@ -1471,12 +1514,13 @@ int main(int argc, char* argv[]) {
 	cout<<"  bernstein="<<(g_bernstein?"on":"off");
 	if(g_bernstein) cout<<" (level="<<g_bernstein_level<<")";
 	cout<<endl;
-	cout<<"projection: "<<(g_onion?"onion":"flat");
+	cout<<"projection: "<<(g_alpha_projection?"alpha":(g_onion?"onion":"flat"));
 	if(g_onion) cout<<" (scale="<<g_onion_scale<<")";
 	cout<<endl;
-	if(!g_onion && g_cutoff<1e299) cout<<"cutoff: "<<g_cutoff<<endl;
+	if(!g_onion && !g_alpha_projection && g_cutoff<1e299) cout<<"cutoff: "<<g_cutoff<<endl;
 
-	string obj_path_s="riemann_cp2_"+catalog[function_index].name+(g_onion?"_onion":"")+".obj";
+	string obj_path_s="riemann_cp2_"+catalog[function_index].name
+			+(g_onion?"_onion":(g_alpha_projection?"_alpha":""))+".obj";
 	const char* obj_path=obj_path_s.c_str();
 
 	// --- Phase 1: seed mesh -- Gaifullin's 15-vertex/108-cell
