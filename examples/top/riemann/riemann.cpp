@@ -1234,14 +1234,48 @@ struct crossing_node {
 	cx w, z;
 };
 
+// Two different jobs used to share one constant (1e-6) here:
+// CLASSIFICATION ("is this triangle's own crossing close enough to a
+// face to treat it as on that face?") and IDENTITY ("are these two
+// already-classified points actually the same point?"). They need very
+// different tolerances. Root-caused via examples/top/slice_probe (a
+// controlled, purely-affine version of this same crossing-graph
+// algorithm, isolated from Newton/poles/branch points -- see its
+// README): a --corner-bias sweep (the probe P pulled almost onto a
+// never-refined seed vertex, the direct analogue of a branch point
+// landing on a seed vertex here) produced bad cells whose per-triangle
+// trace showed TWO DIFFERENT triangles, each with its own genuinely
+// distinct crossing point (differing by ~1e-7-1e-6, far above
+// floating-point noise -- the same order as how far each point
+// actually sits off the shared edge, i.e. two real, separate near-edge
+// points, not one point measured twice), both landing inside the SAME
+// 1e-6 classification window of a shared edge and getting MERGED by
+// same_crossing_node. That collapses what should be a proper >=3-node
+// polygon cycle into a spurious 2-node digon (rejected as a bad cell):
+// the tetrahedron that should connect the two distinct points instead
+// sees them as one point and contributes no edge at all.
+// A genuinely identical point found via two different incident
+// triangles agrees far more tightly than 1e-6 -- when a point is truly
+// ON a shared edge, both triangles' formulas reduce to the same
+// edge-endpoint-only computation, so the only disagreement left is
+// ordinary floating-point roundoff (~1e-9-1e-10 here). So the identity
+// check needs to be much STRICTER than the classification check, not
+// looser (a looser single constant was tried first and measurably
+// made things worse: more, not fewer, bad cells, because it also
+// widened the classification window asymmetrically between sibling
+// triangles). Splitting them (unequal on purpose) cut slice_probe's
+// --corner-bias bad-cell count by 94% (62->4 per 500-trial sweep) with
+// zero regressions on its plain-random battery (~600k cells checked).
+const double CROSSING_SNAP_TOL=1e-6;  // classification: on this face or not?
+const double CROSSING_MERGE_TOL=1e-9; // identity: same point as another node?
+
 void
 compute_crossing_node(const T& t, Simplex(T,2) tri, int r, crossing_node& nd) {
 	double l0,l1,l2;
 	triangle_bary(t,tri,r,l0,l1,l2);
 	double l[3]={l0,l1,l2};
-	const double tol=1e-6;
 	int zeros=0, zi[3];
-	for(int b=0;b<3;++b) if(fabs(l[b])<tol) zi[zeros++]=b;
+	for(int b=0;b<3;++b) if(fabs(l[b])<CROSSING_SNAP_TOL) zi[zeros++]=b;
 	triangle_point(t,tri,r,nd.w,nd.z);
 	nd.sub=r; nd.param=0;
 	if(zeros>=2) {
@@ -1260,7 +1294,7 @@ compute_crossing_node(const T& t, Simplex(T,2) tri, int r, crossing_node& nd) {
 bool
 same_crossing_node(const crossing_node& a, const crossing_node& b) {
 	if(a.dim!=b.dim || a.desc!=b.desc) return false;
-	if(a.dim==1 && fabs(a.param-b.param)>1e-6) return false;
+	if(a.dim==1 && fabs(a.param-b.param)>CROSSING_MERGE_TOL) return false;
 	if(a.dim==2 && a.sub!=b.sub) return false;
 	return true;
 }

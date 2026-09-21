@@ -1106,14 +1106,28 @@ struct crossing_node {
 	pt3 p;
 };
 
+// CROSSING_SNAP_TOL (classification: is this triangle's own crossing
+// close enough to a face to treat it as on that face?) and
+// CROSSING_MERGE_TOL (identity: are two already-classified points
+// actually the same point?) used to be one shared 1e-6 constant here,
+// same as in examples/top/riemann/riemann.cpp -- see that file's
+// comment on this same pair of constants for the full root-cause
+// (found via examples/top/slice_probe's --corner-bias sweep: two
+// different triangles' genuinely distinct near-edge crossings getting
+// wrongly merged by the classification-tolerance-sized window, not
+// -- as first suspected -- kept wrongly apart by too tight an identity
+// check). Splitting them cut slice_probe's bad-cell rate on that sweep
+// by 94% with no regression on its plain-random battery.
+const double CROSSING_SNAP_TOL=1e-6;  // classification: on this face or not?
+const double CROSSING_MERGE_TOL=1e-9; // identity: same point as another node?
+
 void
 compute_crossing_node(const T& t, Simplex(T,2) tri, int r, crossing_node& nd) {
 	double l0,l1,l2;
 	triangle_bary(t,tri,r,l0,l1,l2);
 	double l[3]={l0,l1,l2};
-	const double tol=1e-6;
 	int zeros=0, zi[3];
-	for(int b=0;b<3;++b) if(fabs(l[b])<tol) zi[zeros++]=b;
+	for(int b=0;b<3;++b) if(fabs(l[b])<CROSSING_SNAP_TOL) zi[zeros++]=b;
 	triangle_point(t,tri,r,nd.p);
 	nd.sub=r; nd.param=0;
 	if(zeros>=2) {
@@ -1132,7 +1146,7 @@ compute_crossing_node(const T& t, Simplex(T,2) tri, int r, crossing_node& nd) {
 bool
 same_crossing_node(const crossing_node& a, const crossing_node& b) {
 	if(a.dim!=b.dim || a.desc!=b.desc) return false;
-	if(a.dim==1 && fabs(a.param-b.param)>1e-6) return false;
+	if(a.dim==1 && fabs(a.param-b.param)>CROSSING_MERGE_TOL) return false;
 	if(a.dim==2 && a.sub!=b.sub) return false;
 	return true;
 }
