@@ -1,37 +1,78 @@
 // riemann_cp2_glpt.cpp -- glpt_tree-based rebuild of riemann_cp2.cpp's
-// pipeline (see glpt_points.hpp/glpt_crossing.hpp's own header comments
-// for the two pieces this builds on, and the conversation that led to
-// this file for the full rationale: an O(1)-per-current-cell mesh,
-// ~/code/lpt/glpt_tree.hpp, replacing riemann_cp2.cpp's append-only
-// nmt<4>-backed one).
+// pipeline (see glpt_points.hpp/glpt_crossing.hpp/glpt_extraction.hpp's
+// own header comments for the three pieces this builds on, and the
+// conversation that led to this file for the full rationale: an
+// O(1)-per-current-cell mesh, ~/code/lpt/glpt_tree.hpp, replacing
+// riemann_cp2.cpp's append-only nmt<4>-backed one).
 //
-// SCOPE OF THIS FIRST VERSION: seeds all 108 Gaifullin cells, refines by
-// the SAME gradient-dispersion cell_priority as riemann_cp2.cpp (ported
-// below) through a priority-queue loop driven by glpt_tree::
-// compat_bisect()/recent_leaves(), computes curve crossings on every
-// final leaf's ten 2-faces (face_crossing_cache, so a face shared by
-// many cells is solved once), and writes every distinct crossing point
-// found as an OBJ point cloud. Deliberately NOT yet ported:
-// riemann_cp2.cpp's crossing_node/cycle-extraction machinery (which
-// stitches a cell's own crossing points into actual curve-segment
-// connectivity) and its onion/flat projection modes -- both substantial
-// pieces in their own right, left for a follow-up once this simpler
-// end-to-end pipeline (mesh -> refine -> find crossings -> see them) is
-// confirmed working. A point cloud is enough to visually confirm the
-// extracted locus is in the right place.
+// Seeds all 108 Gaifullin cells, refines by the SAME gradient-dispersion
+// cell_priority as riemann_cp2.cpp (ported below) through a priority-
+// queue loop driven by glpt_tree::compat_bisect()/recent_leaves(), then
+// extracts actual connected polygons per cell (glpt_extraction.hpp's
+// extract_cell(), a faithful port of riemann_cp2.cpp's own Phase-3
+// per-cell graph-building + cycle-decomposition loop) and writes them
+// to an OBJ mesh, projected via the alpha-tilde map (Dutter,
+// arXiv:2608.04323, after Kranich 2015 -- chart-free, bounded by
+// construction, no --onion/--flat mode choice needed the way
+// riemann_cp2.cpp's own project_for_viz() has). Deliberately NOT yet
+// ported: the certified Bernstein-Bezier fallback (only needed when
+// every Newton seed misses a root -- matches riemann_cp2.cpp's own
+// behavior before that fallback existed, not a new gap) and
+// riemann_cp2.cpp's --onion/--flat/--cutoff projection options (alpha
+// alone is enough to see the extracted surface; the others are
+// deferred, not required).
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+#include <map>
 #include <queue>
 #include <fstream>
 #include <iostream>
-#include "glpt_crossing.hpp"
+#include "glpt_extraction.hpp"
 #include "glpt_tree.hpp"
 
 using namespace std;
+
+// --alpha-projection (see this file's own header comment): a function
+// of the homogeneous point itself, no chart/branch choice at all.
+// Copied verbatim from riemann_cp2.cpp's own alpha_projection().
+void alpha_projection(const pt3& p, double out[3]) {
+	double S=std::norm(p[0])+std::norm(p[1])+std::norm(p[2]);
+	cx xy=std::conj(p[0])*p[1];
+	out[0]=std::norm(p[0])/S;
+	out[1]=xy.real()/S;
+	out[2]=xy.imag()/S;
+}
+
+// --- OBJ output vertex dedup: a crossing_node's identity (see
+// glpt_extraction.hpp's own header comment) canonicalized into a
+// single, std::map-orderable key -- dim==1's continuous param is
+// quantized to CROSSING_MERGE_TOL, matching same_crossing_node()'s own
+// tolerance; dim==2's packed face key (60 bits) is split across two
+// ints, with `sub` as the tiebreaker distinguishing a face's up-to-2
+// roots. Only ever holds one entry per ACTUAL distinct output vertex
+// (a small fraction of the mesh, unlike glpt_edge_cache/
+// face_crossing_cache), so std::map's own overhead doesn't matter here.
+struct node_key {
+	int dim, a, b;
+	long long qparam;
+	bool operator<(const node_key& o) const {
+		if(dim!=o.dim) return dim<o.dim;
+		if(a!=o.a) return a<o.a;
+		if(b!=o.b) return b<o.b;
+		return qparam<o.qparam;
+	}
+};
+node_key key_of(const crossing_node& nd) {
+	node_key k; k.dim=nd.dim; k.a=0; k.b=0; k.qparam=0;
+	if(nd.dim==0) { k.a=nd.a; }
+	else if(nd.dim==1) { k.a=nd.a; k.b=nd.b; k.qparam=(long long)(nd.param/CROSSING_MERGE_TOL+0.5); }
+	else { k.a=int(nd.fkey&0xFFFFFFFFu); k.b=int((nd.fkey>>32)&0xFFFFFFFFu); k.qparam=nd.sub; }
+	return k;
+}
 
 // --- cell_priority: gradient-dispersion refinement criterion, ported
 // from riemann_cp2.cpp's own cell_priority() (see that file's comment)
@@ -155,65 +196,87 @@ int main(int argc, char* argv[]) {
 	cout<<"distinct vertices minted: "<<id_cache.next_id()<<" ("<<GLPT_BASE_VERTEX_COUNT<<" base + "
 		<<(id_cache.next_id()-GLPT_BASE_VERTEX_COUNT)<<" from bisection)"<<endl;
 
-	// --- Phase 2: extraction (point cloud only -- see this file's own
-	// header comment on scope) --
-	cout<<endl<<"--- crossing extraction ---"<<endl;
-	// One traversal: query every final leaf's ten faces (face_crossing_
-	// cache solves each DISTINCT face -- by vertex-id triple -- only
-	// once, however many cells touch it) and collect the crossing points
-	// found. A point can still be collected more than once here (once
-	// per cell whose face enumeration reaches it), so a final distance-
-	// based dedup pass removes repeats before writing.
+	// --- Phase 2: extraction -- actual connected polygons, not just
+	// points (glpt_extraction.hpp's extract_cell(), one call per final
+	// leaf; face_crossing_cache solves each DISTINCT 2-face -- by
+	// vertex-id triple -- only once, however many cells' facets touch
+	// it). Output vertices are deduped by crossing_node IDENTITY
+	// (node_key), not by coordinate proximity -- the same node reached
+	// from different cells gets the SAME output vertex index, so shared
+	// edges between adjacent cells' polygons connect exactly, not just
+	// approximately.
+	cout<<endl<<"--- surface extraction ---"<<endl;
 	face_crossing_cache fcache;
-	vector<pt3> emitted;
-	long n_cells_visited=0, n_face_queries=0;
-	struct Collector {
+	int npoly_out[8]={0,0,0,0,0,0,0,0};
+	int ntouching_tets=0, nbad_tets=0, ok_cells=0, bad_cells=0;
+	vector<pt3> vert_pts;
+	map<node_key,int> vert_index;
+	vector<vector<int> > faces_out;
+	long n_cells_visited=0;
+
+	struct Extractor {
 		const vector<pt3>* gp; glpt_edge_cache* idc; face_crossing_cache* fc;
-		vector<pt3>* out; long* n_cells; long* n_faces;
+		long* n_cells; int *ok, *bad, *ntouch, *nbad_t, *npoly;
+		vector<pt3>* vpts; map<node_key,int>* vidx; vector<vector<int> >* faces;
+
+		int emit(const crossing_node& nd) const {
+			node_key k = key_of(nd);
+			map<node_key,int>::iterator it = vidx->find(k);
+			if(it!=vidx->end()) return it->second;
+			int idx=(int)vpts->size();
+			vpts->push_back(nd.p);
+			(*vidx)[k]=idx;
+			return idx;
+		}
 		void operator()(const glpt& c) const {
 			++(*n_cells);
 			pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
 			cell_points_and_ids(c, *gp, *idc, pts, ids);
-			for(int f=0;f<10;++f) {
-				pt3 face_pts[3]; int face_ids[3];
-				for(int k=0;k<3;++k) { face_pts[k]=pts[GLPT_CELL_FACES[f][k]]; face_ids[k]=ids[GLPT_CELL_FACES[f][k]]; }
-				const face_result& fr = fc->get(face_pts, face_ids);
-				++(*n_faces);
-				for(int r=0;r<fr.nroots;++r) out->push_back(fc->root_point(fr,r));
+			cell_extraction_result res;
+			extract_cell(pts, ids, *fc, res);
+			if(!res.any_edge) return; // curve doesn't cross this cell at all -- not a failure, nothing to count
+			*ntouch += res.ntouching_tets;
+			*nbad_t += res.nbad_tets;
+			if(!res.decompose_ok) { ++(*bad); return; }
+			++(*ok);
+			for(size_t p=0;p<res.cycles.size();++p) {
+				const vector<int>& cyc = res.cycles[p];
+				int sz=(int)cyc.size();
+				if(sz>=3 && sz<8) ++npoly[sz];
+				vector<int> face;
+				for(size_t i=0;i<cyc.size();++i) face.push_back(emit(res.nodes[cyc[i]]));
+				faces->push_back(face);
 			}
 		}
 	};
-	Collector col; col.gp=&gp; col.idc=&id_cache; col.fc=&fcache; col.out=&emitted;
-	col.n_cells=&n_cells_visited; col.n_faces=&n_face_queries;
-	tree.for_each_leaf(col);
-	cout<<"cells visited: "<<n_cells_visited<<", face queries: "<<n_face_queries
-		<<", distinct faces solved: "<<fcache.size()<<", crossing points before dedup: "<<emitted.size()<<endl;
+	Extractor ext;
+	ext.gp=&gp; ext.idc=&id_cache; ext.fc=&fcache; ext.n_cells=&n_cells_visited;
+	ext.ok=&ok_cells; ext.bad=&bad_cells; ext.ntouch=&ntouching_tets; ext.nbad_t=&nbad_tets; ext.npoly=npoly_out;
+	ext.vpts=&vert_pts; ext.vidx=&vert_index; ext.faces=&faces_out;
+	tree.for_each_leaf(ext);
 
-	// --- Phase 3: output (point cloud OBJ) --
+	cout<<"cells visited: "<<n_cells_visited<<", distinct faces solved: "<<fcache.size()<<endl;
+	cout<<"extracted cells: ok="<<ok_cells<<" bad="<<bad_cells<<endl;
+	cout<<"polygon sizes:";
+	for(int sz=3;sz<8;++sz) if(npoly_out[sz]) cout<<" "<<sz<<"-gon="<<npoly_out[sz];
+	cout<<endl;
+	cout<<"touching tetrahedra: "<<ntouching_tets<<"  unhandled node count: "<<nbad_tets<<endl;
+
+	// --- Phase 3: output (OBJ mesh, alpha-tilde projection) --
 	ofstream out(obj_path.c_str());
 	if(!out) { cerr<<"couldn't open "<<obj_path<<" for writing"<<endl; return 1; }
-	out<<"# riemann_cp2_glpt point cloud: curve="<<cat[function_idx].name
+	out<<"# riemann_cp2_glpt surface extraction: curve="<<cat[function_idx].name
 		<<" depth="<<max_depth<<" threshold="<<threshold<<"\n";
-	long npts=0;
-	for(size_t i=0;i<emitted.size();++i) {
-		bool dup=false;
-		for(size_t j=0;j<i && !dup;++j) {
-			double d=0; for(int k=0;k<3;++k) d+=std::norm(emitted[i][k]-emitted[j][k]);
-			if(d<1e-16) dup=true;
-		}
-		if(dup) continue;
-		// Real, chart-independent embedding: project onto a fixed affine
-		// chart (largest-magnitude homogeneous coordinate) just for a
-		// viewable point cloud -- not the onion/flat projection modes
-		// riemann_cp2.cpp offers (deferred, see this file's own header
-		// comment).
-		const pt3& p = emitted[i];
-		int c=0; double best=-1;
-		for(int k=0;k<3;++k) if(std::abs(p[k])>best) { best=std::abs(p[k]); c=k; }
-		cx a,b; dehomogenize(c,p,a,b);
-		out<<"v "<<a.real()<<" "<<a.imag()<<" "<<b.real()<<"\n";
-		++npts;
+	out<<"# projected via alpha-tilde (Dutter arXiv:2608.04323, after Kranich 2015)\n";
+	for(size_t i=0;i<vert_pts.size();++i) {
+		double p[3]; alpha_projection(vert_pts[i], p);
+		out<<"v "<<p[0]<<" "<<p[1]<<" "<<p[2]<<"\n";
 	}
-	cout<<"points written: "<<npts<<" -> "<<obj_path<<endl;
+	for(size_t i=0;i<faces_out.size();++i) {
+		out<<"f";
+		for(size_t k=0;k<faces_out[i].size();++k) out<<" "<<(faces_out[i][k]+1);
+		out<<"\n";
+	}
+	cout<<"wrote "<<obj_path<<": "<<vert_pts.size()<<" vertices, "<<faces_out.size()<<" faces"<<endl;
 	return 0;
 }

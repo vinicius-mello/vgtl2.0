@@ -309,7 +309,11 @@ class face_crossing_cache {
 		//! Returns a reference valid until the next insertion triggers a
 		//! grow (rehash reallocates every slot) -- like glpt_edge_cache,
 		//! not meant to be held onto across a later get() call. Use
-		//! root_point(fr,r) to read back a found root's actual position.
+		//! root_point(fr,r)/root_bary(fr,r) to read back a found root's
+		//! actual position and its barycentric coordinates relative to
+		//! p[0],p[1],p[2] in the order THIS call was made with (needed by
+		//! glpt_extraction.hpp to classify a root as sitting on a vertex,
+		//! edge, or the face interior).
 		const face_result& get(const pt3 p[3], const int id[3]) {
 			uint64_t key = face_key_pack(id[0],id[1],id[2]);
 			size_t slot = find_slot_(key);
@@ -319,17 +323,24 @@ class face_crossing_cache {
 			int nr = compute_face_crossing(p, out_pts, out_bary);
 			fr.nroots = (unsigned char)nr;
 			fr.root_idx = nr>0 ? (int)root_pts_.size() : -1;
-			for(int r=0;r<nr;++r) root_pts_.push_back(out_pts[r]);
+			for(int r=0;r<nr;++r) {
+				root_pts_.push_back(out_pts[r]);
+				bary3 b; b.l[0]=out_bary[r][0]; b.l[1]=out_bary[r][1]; b.l[2]=out_bary[r][2];
+				root_bary_.push_back(b);
+			}
 			return insert_(key, fr);
 		}
 		pt3 root_point(const face_result& fr, int r) const { return root_pts_[fr.root_idx+r]; }
+		const double* root_bary(const face_result& fr, int r) const { return root_bary_[fr.root_idx+r].l; }
 		size_t size() const { return count_; }
 
 	private:
+		struct bary3 { double l[3]; };
 		uint64_t* keys_;
 		face_result* results_;
 		size_t nbuckets_, count_;
 		std::vector<pt3> root_pts_;
+		std::vector<bary3> root_bary_;
 
 		void alloc_(size_t n) {
 			keys_ = (uint64_t*)std::calloc(n,sizeof(uint64_t));

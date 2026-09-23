@@ -69,6 +69,15 @@ inline cx hdot(const pt3& a, const pt3& b) {
 	return r;
 }
 inline double hnorm(const pt3& a) { return std::sqrt(std::max(0.0, hdot(a,a).real())); }
+// Fubini-Study distance between two unit representatives: arccos|<a,b>|
+// -- copied verbatim from riemann_cp2.cpp's own fs_dist (used there for
+// the same reason it's needed here: glpt_extraction.hpp's ntn==4
+// pairing-selection heuristic).
+inline double fs_dist(const pt3& a, const pt3& b) {
+	double ip=std::abs(hdot(a,b));
+	if(ip>1.0) ip=1.0;
+	return std::acos(ip);
+}
 inline pt3 normalize3(pt3 a) {
 	double n=hnorm(a);
 	for(int i=0;i<3;++i) a[i]/=n;
