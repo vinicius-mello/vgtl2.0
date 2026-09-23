@@ -152,6 +152,8 @@ int main(int argc, char* argv[]) {
 	}
 	cout<<"subdivisions performed: "<<nsubdivisions<<endl;
 	cout<<"final leaf count: "<<tree.leaf_count()<<endl;
+	cout<<"distinct vertices minted: "<<id_cache.next_id()<<" ("<<GLPT_BASE_VERTEX_COUNT<<" base + "
+		<<(id_cache.next_id()-GLPT_BASE_VERTEX_COUNT)<<" from bisection)"<<endl;
 
 	// --- Phase 2: extraction (point cloud only -- see this file's own
 	// header comment on scope) --
@@ -177,7 +179,7 @@ int main(int argc, char* argv[]) {
 				for(int k=0;k<3;++k) { face_pts[k]=pts[GLPT_CELL_FACES[f][k]]; face_ids[k]=ids[GLPT_CELL_FACES[f][k]]; }
 				const face_result& fr = fc->get(face_pts, face_ids);
 				++(*n_faces);
-				for(int r=0;r<fr.nroots;++r) out->push_back(fr.pts[r]);
+				for(int r=0;r<fr.nroots;++r) out->push_back(fc->root_point(fr,r));
 			}
 		}
 	};

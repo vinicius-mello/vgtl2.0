@@ -45,8 +45,8 @@
 #include "glpt_points.hpp"
 #include "glpt_vertex_ids.hpp"
 #include "../riemann_cp2/functions_cp2.hpp"
-#include <map>
 #include <cmath>
+#include <vector>
 
 // --- Current curve (set_curve mirrors riemann_cp2.cpp's own global-F
 // design: F_chart*/Fa_chart*/Fb_chart* below are plain function
@@ -232,42 +232,139 @@ inline int compute_face_crossing(const pt3 p[3], pt3 out_pts[2], double out_bary
 // --- Face cache, keyed by the sorted GLOBAL vertex id triple (see this
 // file's header comment for why: the same physical 2-face is reached
 // from potentially many different 4-cells, and they must all agree).
-struct face_key {
-	int a,b,c; // sorted ascending
-	face_key(int x,int y,int z) {
-		int v[3]={x,y,z};
-		for(int i=0;i<3;++i) for(int j=i+1;j<3;++j) if(v[j]<v[i]) { int t=v[i]; v[i]=v[j]; v[j]=t; }
-		a=v[0]; b=v[1]; c=v[2];
-	}
-	bool operator<(const face_key& o) const {
-		if(a!=o.a) return a<o.a;
-		if(b!=o.b) return b<o.b;
-		return c<o.c;
-	}
-};
+//
+// The key is packed into a SINGLE uint64_t, not a 3-int struct: reuses
+// glpt_vertex_ids.hpp's GLPT_VERTEX_ID_BITS=20 contract (same one
+// glpt_edge_cache packs its own ids into -- user's suggestion,
+// 2026-09-23, after measuring actual vertex counts: 71196 at 1461588
+// leaves, --depth 16 on the conic curve, far under 2^20's headroom) --
+// bit 63 = present (glpt_tree.hpp's own PRESENT_BIT trick), bits
+// [40,60)=a, [20,40)=b, [0,20)=c. This is what actually removes the
+// separate face_key(12 bytes) + bool present(1 byte) arrays the
+// previous open-addressing version still had, folding both into the
+// one 8-byte key array.
+static uint64_t face_key_pack(int a, int b, int c) {
+	int v[3]={a,b,c};
+	for(int i=0;i<3;++i) for(int j=i+1;j<3;++j) if(v[j]<v[i]) { int t=v[i]; v[i]=v[j]; v[j]=t; }
+	assert(uint64_t(v[0])<=GLPT_VERTEX_ID_MASK && uint64_t(v[2])<=GLPT_VERTEX_ID_MASK
+		&& "face_key_pack: a vertex id exceeds the 20-bit capacity shared with glpt_edge_cache");
+	return glpt_edge_cache::PRESENT_BIT
+		| (uint64_t(uint32_t(v[0]))<<40) | (uint64_t(uint32_t(v[1]))<<20) | uint64_t(uint32_t(v[2]));
+}
+
+// COMPACT on purpose: unsigned char + int is 8 bytes (with padding),
+// not the ~100 bytes two full pt3 roots would cost inline -- see
+// face_crossing_cache's own comment for why this matters (most cached
+// faces, in a realistically refined mesh, have nroots==0: nowhere near
+// the curve). Mirrors riemann_cp2.cpp's own extra_data<2> (nroots +
+// root_idx into a shared, compact g_roots vector), which already solved
+// this exact problem for the SAME reason there -- not a new idea, just
+// finally applied here too once it was found to matter (see below).
 struct face_result {
-	int nroots;
-	pt3 pts[2];
+	unsigned char nroots;
+	int root_idx; // index into face_crossing_cache's own root list; meaningless if nroots==0
 };
 
+// Open addressing (glpt_tree.hpp's own design in ~/code/lpt, reusing
+// its hash/prime helpers via glpt_hash_util.hpp), NOT std::map -- an
+// earlier std::map version was found, by directly measuring
+// riemann_cp2_glpt.cpp's peak RSS against riemann_cp2.cpp, to be the
+// dominant memory cost at any real refinement depth (2026-09-23; see
+// glpt_vertex_ids.hpp's glpt_edge_cache for the identical finding and
+// fix, applied here the same way): red-black-tree node overhead (3
+// pointers + color) on top of the slot data.
+//
+// SECOND fix found by the SAME measurement, after the first (map ->
+// open addressing) unexpectedly made peak RSS WORSE, not better:
+// face_result used to store its up-to-2 root points INLINE (2 pt3 = 96
+// bytes) in EVERY slot, whether or not that face actually had a root --
+// and in a realistically refined mesh MOST cached faces sit nowhere
+// near the curve (nroots==0), so most of that 96 bytes/slot was pure
+// waste. At ~982000 distinct faces (--depth 13 on the conic curve) that
+// was ~94MB on its own, more than riemann_cp2.cpp's ENTIRE peak RSS at
+// the same settings (171MB). Root points now live in a separate,
+// compact root_pts_ vector, appended to only when a face actually has
+// one -- exactly mirroring riemann_cp2.cpp's own extra_data<2>/g_roots
+// split, which already solved this for the identical reason there.
+//
+// THIRD fix (this one): the face_key struct (3 plain ints, 12 bytes)
+// plus a separate bool present array -- open addressing alone doesn't
+// help if the key itself is bigger than it needs to be. Packed into the
+// single uint64_t described above (face_key_pack()), matching
+// glpt_edge_cache's own packing exactly.
+//
+// No deletion needed here (faces are never forgotten), so this is
+// simpler than glpt_edge_cache's own version -- insert/lookup/grow only.
 class face_crossing_cache {
 	public:
+		explicit face_crossing_cache(size_t initial_buckets = 1031)
+			: keys_(0), results_(0), nbuckets_(0), count_(0)
+		{
+			alloc_(glpt_next_prime(initial_buckets));
+		}
+		~face_crossing_cache() { std::free(keys_); std::free(results_); }
+
 		//! Looks up or computes the crossing(s) of face (p[0],p[1],p[2])
 		//! (global ids id[0..2], any order -- canonicalized internally).
-		//! Returns a reference valid until the next insertion.
+		//! Returns a reference valid until the next insertion triggers a
+		//! grow (rehash reallocates every slot) -- like glpt_edge_cache,
+		//! not meant to be held onto across a later get() call. Use
+		//! root_point(fr,r) to read back a found root's actual position.
 		const face_result& get(const pt3 p[3], const int id[3]) {
-			face_key key(id[0],id[1],id[2]);
-			std::map<face_key,face_result>::iterator it = cache_.find(key);
-			if(it!=cache_.end()) return it->second;
+			uint64_t key = face_key_pack(id[0],id[1],id[2]);
+			size_t slot = find_slot_(key);
+			if(slot!=size_t(-1)) return results_[slot];
 			face_result fr;
 			pt3 out_pts[2]; double out_bary[2][3];
-			fr.nroots = compute_face_crossing(p, out_pts, out_bary);
-			for(int r=0;r<fr.nroots;++r) fr.pts[r]=out_pts[r];
-			return cache_.insert(std::make_pair(key,fr)).first->second;
+			int nr = compute_face_crossing(p, out_pts, out_bary);
+			fr.nroots = (unsigned char)nr;
+			fr.root_idx = nr>0 ? (int)root_pts_.size() : -1;
+			for(int r=0;r<nr;++r) root_pts_.push_back(out_pts[r]);
+			return insert_(key, fr);
 		}
-		size_t size() const { return cache_.size(); }
+		pt3 root_point(const face_result& fr, int r) const { return root_pts_[fr.root_idx+r]; }
+		size_t size() const { return count_; }
+
 	private:
-		std::map<face_key,face_result> cache_;
+		uint64_t* keys_;
+		face_result* results_;
+		size_t nbuckets_, count_;
+		std::vector<pt3> root_pts_;
+
+		void alloc_(size_t n) {
+			keys_ = (uint64_t*)std::calloc(n,sizeof(uint64_t));
+			results_ = (face_result*)std::calloc(n,sizeof(face_result));
+			assert(keys_!=0 && results_!=0 && "face_crossing_cache: out of memory");
+			nbuckets_ = n;
+		}
+		size_t find_slot_(uint64_t key) const {
+			size_t h = glpt_hash64(key) % nbuckets_;
+			while(keys_[h]!=0) {
+				if(keys_[h]==key) return h;
+				h=(h+1)%nbuckets_;
+			}
+			return size_t(-1);
+		}
+		void grow_if_needed_() {
+			if(double(count_+1) <= 0.7*double(nbuckets_)) return;
+			uint64_t* old_k=keys_; face_result* old_r=results_;
+			size_t old_n=nbuckets_;
+			alloc_(glpt_next_prime(2*old_n));
+			count_=0;
+			for(size_t i=0;i<old_n;++i) if(old_k[i]!=0) insert_(old_k[i], old_r[i]);
+			std::free(old_k); std::free(old_r);
+		}
+		const face_result& insert_(uint64_t key, const face_result& val) {
+			grow_if_needed_();
+			size_t h = glpt_hash64(key) % nbuckets_;
+			while(keys_[h]!=0) h=(h+1)%nbuckets_;
+			keys_[h]=key; results_[h]=val;
+			++count_;
+			return results_[h];
+		}
+
+		face_crossing_cache(const face_crossing_cache&);
+		face_crossing_cache& operator=(const face_crossing_cache&);
 };
 
 // --- Enumerates a glpt 4-cell's ten 2-faces (choose 3 of its 5 local
