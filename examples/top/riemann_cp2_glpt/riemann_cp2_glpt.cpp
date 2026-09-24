@@ -11,15 +11,16 @@
 // extracts actual connected polygons per cell (glpt_extraction.hpp's
 // extract_cell(), a faithful port of riemann_cp2.cpp's own Phase-3
 // per-cell graph-building + cycle-decomposition loop) and writes them
-// to an OBJ mesh, projected via the alpha-tilde map (Dutter,
-// arXiv:2608.04323, after Kranich 2015 -- chart-free, bounded by
-// construction, no --onion/--flat mode choice needed the way
-// riemann_cp2.cpp's own project_for_viz() has). Deliberately NOT yet
-// ported: the certified Bernstein-Bezier fallback (only needed when
-// every Newton seed misses a root -- matches riemann_cp2.cpp's own
-// behavior before that fallback existed, not a new gap) and
-// riemann_cp2.cpp's --onion/--flat/--cutoff projection options (alpha
-// alone is enough to see the extracted surface; the others are
+// to an OBJ mesh under one of two projections, matching riemann_cp2.cpp's
+// own --flat (default)/--alpha-projection choice and semantics exactly:
+// flat (per-polygon best-conditioned affine chart, (Re a, Im a, Re b),
+// clippable via --cutoff) or alpha-tilde (Dutter, arXiv:2608.04323,
+// after Kranich 2015 -- chart-free, bounded by construction, no
+// --cutoff needed). Deliberately NOT ported: the certified
+// Bernstein-Bezier fallback (only needed when every Newton seed misses
+// a root -- matches riemann_cp2.cpp's own behavior before that
+// fallback existed, not a new gap) and riemann_cp2.cpp's --onion mode
+// (flat+alpha are enough to see the extracted surface; onion is
 // deferred, not required).
 
 #include <cstdio>
@@ -45,6 +46,32 @@ void alpha_projection(const pt3& p, double out[3]) {
 	out[0]=std::norm(p[0])/S;
 	out[1]=xy.real()/S;
 	out[2]=xy.imag()/S;
+}
+
+// --flat (default): per-polygon best-conditioned affine chart, copied
+// verbatim from riemann_cp2.cpp's own pick_chart_polygon() -- picks
+// ONE chart for the whole polygon (maximizing the minimum |coordinate|
+// across all of its nodes), not per point; that file's own comment
+// documents a real bug (0.69% of polygons, "ribbon spray" artifact)
+// from picking per-point instead, which this avoids by construction.
+int pick_chart_polygon(const std::vector<crossing_node>& nodes, const std::vector<int>& cyc) {
+	int chart=0; double best=-1;
+	for(int c=0;c<3;++c) {
+		double m=1e300;
+		for(size_t i=0;i<cyc.size();++i) {
+			double v=std::abs(nodes[cyc[i]].p[c]);
+			if(v<m) m=v;
+		}
+		if(m>best) { best=m; chart=c; }
+	}
+	return chart;
+}
+// Same (Re a, Im a, Re b) affine-chart projection as riemann_cp2.cpp's
+// own project_for_viz() flat branch, using glpt_crossing.hpp's own
+// dehomogenize().
+void flat_projection(const pt3& p, int chart, double out[3]) {
+	cx a,b; dehomogenize(chart,p,a,b);
+	out[0]=a.real(); out[1]=a.imag(); out[2]=b.real();
 }
 
 // --- OBJ output vertex dedup: a crossing_node's identity (see
@@ -135,6 +162,11 @@ int main(int argc, char* argv[]) {
 	int max_depth=8;
 	double threshold=0.05;
 	string obj_path="riemann_cp2_glpt.obj";
+	// projection: same default/flags as riemann_cp2.cpp's own --flat
+	// (implicit default)/--alpha-projection/--cutoff (onion deliberately
+	// not ported here -- see this file's own header comment).
+	bool alpha_mode=false;
+	double cutoff=1e300;
 
 	for(int i=1;i<argc;++i) {
 		string arg=argv[i];
@@ -142,9 +174,13 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--depth" && i+1<argc) { max_depth=atoi(argv[++i]); }
 		else if(arg=="--threshold" && i+1<argc) { threshold=atof(argv[++i]); }
 		else if(arg=="--obj" && i+1<argc) { obj_path=argv[++i]; }
+		else if(arg=="--flat") { alpha_mode=false; }
+		else if(arg=="--alpha-projection") { alpha_mode=true; }
+		else if(arg=="--cutoff" && i+1<argc) { cutoff=atof(argv[++i]); }
 		else if(arg=="--list") { print_function_catalog_cp2(cout); return 0; }
 		else {
-			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] [--list]"<<endl;
+			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
+				<<"[--flat] [--alpha-projection] [--cutoff X] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
 			return 0;
 		}
@@ -200,24 +236,47 @@ int main(int argc, char* argv[]) {
 	// points (glpt_extraction.hpp's extract_cell(), one call per final
 	// leaf; face_crossing_cache solves each DISTINCT 2-face -- by
 	// vertex-id triple -- only once, however many cells' facets touch
-	// it). Output vertices are deduped by crossing_node IDENTITY
-	// (node_key), not by coordinate proximity -- the same node reached
-	// from different cells gets the SAME output vertex index, so shared
-	// edges between adjacent cells' polygons connect exactly, not just
-	// approximately.
+	// it).
+	//
+	// Output vertex handling differs by projection mode:
+	//   alpha (--alpha-projection): chart-free (see alpha_projection()'s
+	//   own comment) -- a given point always projects the same way no
+	//   matter which polygon references it, so vertices are deduped by
+	//   crossing_node IDENTITY (node_key), not coordinate proximity: the
+	//   same node reached from different cells gets the SAME output
+	//   vertex index, and shared edges between adjacent cells' polygons
+	//   connect exactly.
+	//   flat (default, --flat): NOT chart-free -- riemann_cp2.cpp's own
+	//   history (pick_chart_polygon's comment) found a real bug from
+	//   letting the same point be dehomogenized in different (a,b)
+	//   frames depending on which polygon it's part of ("ribbon spray").
+	//   Its fix -- one best-conditioned chart per WHOLE polygon -- is
+	//   only correct if vertices are NOT globally shared across
+	//   polygons with different chart choices, so flat mode writes
+	//   independent vertices per polygon, exactly like riemann_cp2.cpp's
+	//   own OBJ output does (verified there directly: every output edge
+	//   at multiplicity 1, no global dedup at all).
 	cout<<endl<<"--- surface extraction ---"<<endl;
 	face_crossing_cache fcache;
 	int npoly_out[8]={0,0,0,0,0,0,0,0};
-	int ntouching_tets=0, nbad_tets=0, ok_cells=0, bad_cells=0;
+	int ntouching_tets=0, nbad_tets=0, ok_cells=0, bad_cells=0, nclipped=0;
+	long n_cells_visited=0;
+
+	// alpha mode output (globally deduped)
 	vector<pt3> vert_pts;
 	map<node_key,int> vert_index;
 	vector<vector<int> > faces_out;
-	long n_cells_visited=0;
+	// flat mode output (independent per-polygon vertices, already projected)
+	struct vec3d { double v[3]; };
+	vector<vec3d> flat_verts;
+	vector<vector<int> > flat_faces;
 
 	struct Extractor {
 		const vector<pt3>* gp; glpt_edge_cache* idc; face_crossing_cache* fc;
-		long* n_cells; int *ok, *bad, *ntouch, *nbad_t, *npoly;
+		long* n_cells; int *ok, *bad, *ntouch, *nbad_t, *npoly, *nclip;
+		bool alpha_mode; double cutoff;
 		vector<pt3>* vpts; map<node_key,int>* vidx; vector<vector<int> >* faces;
+		vector<vec3d>* fverts; vector<vector<int> >* ffaces;
 
 		int emit(const crossing_node& nd) const {
 			node_key k = key_of(nd);
@@ -243,16 +302,35 @@ int main(int argc, char* argv[]) {
 				const vector<int>& cyc = res.cycles[p];
 				int sz=(int)cyc.size();
 				if(sz>=3 && sz<8) ++npoly[sz];
-				vector<int> face;
-				for(size_t i=0;i<cyc.size();++i) face.push_back(emit(res.nodes[cyc[i]]));
-				faces->push_back(face);
+				if(alpha_mode) {
+					vector<int> face;
+					for(size_t i=0;i<cyc.size();++i) face.push_back(emit(res.nodes[cyc[i]]));
+					faces->push_back(face);
+				} else {
+					int chart = pick_chart_polygon(res.nodes, cyc);
+					vector<vec3d> proj(cyc.size());
+					bool clip=false;
+					for(size_t i=0;i<cyc.size();++i) {
+						double q[3]; flat_projection(res.nodes[cyc[i]].p, chart, q);
+						proj[i].v[0]=q[0]; proj[i].v[1]=q[1]; proj[i].v[2]=q[2];
+						double dd=sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]);
+						if(dd>cutoff) clip=true;
+					}
+					if(clip) { ++(*nclip); continue; }
+					int base=(int)fverts->size();
+					vector<int> face(cyc.size());
+					for(size_t i=0;i<proj.size();++i) { fverts->push_back(proj[i]); face[i]=base+(int)i; }
+					ffaces->push_back(face);
+				}
 			}
 		}
 	};
 	Extractor ext;
 	ext.gp=&gp; ext.idc=&id_cache; ext.fc=&fcache; ext.n_cells=&n_cells_visited;
 	ext.ok=&ok_cells; ext.bad=&bad_cells; ext.ntouch=&ntouching_tets; ext.nbad_t=&nbad_tets; ext.npoly=npoly_out;
+	ext.nclip=&nclipped; ext.alpha_mode=alpha_mode; ext.cutoff=cutoff;
 	ext.vpts=&vert_pts; ext.vidx=&vert_index; ext.faces=&faces_out;
+	ext.fverts=&flat_verts; ext.ffaces=&flat_faces;
 	tree.for_each_leaf(ext);
 
 	cout<<"cells visited: "<<n_cells_visited<<", distinct faces solved: "<<fcache.size()<<endl;
@@ -261,22 +339,36 @@ int main(int argc, char* argv[]) {
 	for(int sz=3;sz<8;++sz) if(npoly_out[sz]) cout<<" "<<sz<<"-gon="<<npoly_out[sz];
 	cout<<endl;
 	cout<<"touching tetrahedra: "<<ntouching_tets<<"  unhandled node count: "<<nbad_tets<<endl;
+	if(!alpha_mode && cutoff<1e299) cout<<"polygons dropped by --cutoff: "<<nclipped<<endl;
 
-	// --- Phase 3: output (OBJ mesh, alpha-tilde projection) --
+	// --- Phase 3: output (OBJ mesh) --
 	ofstream out(obj_path.c_str());
 	if(!out) { cerr<<"couldn't open "<<obj_path<<" for writing"<<endl; return 1; }
 	out<<"# riemann_cp2_glpt surface extraction: curve="<<cat[function_idx].name
 		<<" depth="<<max_depth<<" threshold="<<threshold<<"\n";
-	out<<"# projected via alpha-tilde (Dutter arXiv:2608.04323, after Kranich 2015)\n";
-	for(size_t i=0;i<vert_pts.size();++i) {
-		double p[3]; alpha_projection(vert_pts[i], p);
-		out<<"v "<<p[0]<<" "<<p[1]<<" "<<p[2]<<"\n";
+	if(alpha_mode) {
+		out<<"# projected via alpha-tilde (Dutter arXiv:2608.04323, after Kranich 2015)\n";
+		for(size_t i=0;i<vert_pts.size();++i) {
+			double p[3]; alpha_projection(vert_pts[i], p);
+			out<<"v "<<p[0]<<" "<<p[1]<<" "<<p[2]<<"\n";
+		}
+		for(size_t i=0;i<faces_out.size();++i) {
+			out<<"f";
+			for(size_t k=0;k<faces_out[i].size();++k) out<<" "<<(faces_out[i][k]+1);
+			out<<"\n";
+		}
+		cout<<"wrote "<<obj_path<<": "<<vert_pts.size()<<" vertices, "<<faces_out.size()<<" faces"<<endl;
+	} else {
+		out<<"# projected via per-polygon best affine chart (Re a, Im a, Re b)\n";
+		if(cutoff<1e299) out<<"# cutoff: polygons with a vertex farther than "<<cutoff<<" from the origin dropped\n";
+		for(size_t i=0;i<flat_verts.size();++i)
+			out<<"v "<<flat_verts[i].v[0]<<" "<<flat_verts[i].v[1]<<" "<<flat_verts[i].v[2]<<"\n";
+		for(size_t i=0;i<flat_faces.size();++i) {
+			out<<"f";
+			for(size_t k=0;k<flat_faces[i].size();++k) out<<" "<<(flat_faces[i][k]+1);
+			out<<"\n";
+		}
+		cout<<"wrote "<<obj_path<<": "<<flat_verts.size()<<" vertices, "<<flat_faces.size()<<" faces"<<endl;
 	}
-	for(size_t i=0;i<faces_out.size();++i) {
-		out<<"f";
-		for(size_t k=0;k<faces_out[i].size();++k) out<<" "<<(faces_out[i][k]+1);
-		out<<"\n";
-	}
-	cout<<"wrote "<<obj_path<<": "<<vert_pts.size()<<" vertices, "<<faces_out.size()<<" faces"<<endl;
 	return 0;
 }
