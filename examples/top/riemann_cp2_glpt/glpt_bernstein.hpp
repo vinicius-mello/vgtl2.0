@@ -42,7 +42,7 @@
  * own per-simplex storage. glpt has no such attached storage (see
  * glpt_tree.hpp's own header comment on why), so -- exactly like
  * face_crossing_cache already does for crossing roots -- this needs its
- * own explicit cache, keyed the SAME way (face_key_pack's sorted
+ * own explicit cache, keyed the SAME way (make_face_key's sorted
  * global-vertex-id triple), so a 2-face shared by many 4-cells only
  * gets its bounds computed once. Kept SEPARATE from face_crossing_cache
  * itself (not folded into face_result) because bounds are needed for
@@ -227,24 +227,28 @@ const int BFALLBACK_LEVEL=6; // narrows the seed to within 2^-6 of the face's ow
 
 // --- Per-face Bernstein bounds cache (see this file's own header
 // comment): open addressing (glpt_tree.hpp's own design, via
-// glpt_hash_util.hpp), keyed by the SAME packed sorted-vertex-id triple
-// face_crossing_cache uses (face_key_pack). Values narrowed to float,
-// rounded OUTWARD (nextafterf away from 0-straddling) so the stored box
-// stays a certified superset of the double-precision enclosure -- same
-// technique and reasoning as riemann_cp2.cpp's own compute_bernstein_bounds.
+// glpt_hash_util.hpp), keyed by the SAME exact sorted-vertex-id triple
+// face_crossing_cache uses (glpt_crossing.hpp's face_key/make_face_key
+// -- a genuine two-field key, not a single lossy hash, so ids can range
+// over the full 32-bit space with no collision risk; see face_key's own
+// comment for why this file was reverted off a 20-bit-per-id packing).
+// Values narrowed to float, rounded OUTWARD (nextafterf away from
+// 0-straddling) so the stored box stays a certified superset of the
+// double-precision enclosure -- same technique and reasoning as
+// riemann_cp2.cpp's own compute_bernstein_bounds.
 class bernstein_bounds_cache {
 	public:
 		struct bbounds { float reLo,reHi,imLo,imHi; };
 
 		explicit bernstein_bounds_cache(size_t initial_buckets = 1031)
-			: keys_(0), vals_(0), nbuckets_(0), count_(0)
+			: keys_(0), present_(0), vals_(0), nbuckets_(0), count_(0)
 		{
 			alloc_(glpt_next_prime(initial_buckets));
 		}
-		~bernstein_bounds_cache() { std::free(keys_); std::free(vals_); }
+		~bernstein_bounds_cache() { std::free(keys_); std::free(present_); std::free(vals_); }
 
 		const bbounds& get(const pt3 p[3], const int id[3]) {
-			uint64_t key = face_key_pack(id[0],id[1],id[2]);
+			face_key key = make_face_key(id[0],id[1],id[2]);
 			size_t slot = find_slot_(key);
 			if(slot!=size_t(-1)) return vals_[slot];
 
@@ -266,19 +270,21 @@ class bernstein_bounds_cache {
 		size_t size() const { return count_; }
 
 	private:
-		uint64_t* keys_;
+		face_key* keys_;
+		bool* present_;
 		bbounds* vals_;
 		size_t nbuckets_, count_;
 
 		void alloc_(size_t n) {
-			keys_ = (uint64_t*)std::calloc(n,sizeof(uint64_t));
+			keys_ = (face_key*)std::calloc(n,sizeof(face_key));
+			present_ = (bool*)std::calloc(n,sizeof(bool));
 			vals_ = (bbounds*)std::calloc(n,sizeof(bbounds));
-			assert(keys_!=0 && vals_!=0 && "bernstein_bounds_cache: out of memory");
+			assert(keys_!=0 && present_!=0 && vals_!=0 && "bernstein_bounds_cache: out of memory");
 			nbuckets_ = n;
 		}
-		size_t find_slot_(uint64_t key) const {
-			size_t h = glpt_hash64(key) % nbuckets_;
-			while(keys_[h]!=0) {
+		size_t find_slot_(const face_key& key) const {
+			size_t h = glpt_hash_face_key(key) % nbuckets_;
+			while(present_[h]) {
 				if(keys_[h]==key) return h;
 				h=(h+1)%nbuckets_;
 			}
@@ -286,18 +292,18 @@ class bernstein_bounds_cache {
 		}
 		void grow_if_needed_() {
 			if(double(count_+1) <= 0.7*double(nbuckets_)) return;
-			uint64_t* old_k=keys_; bbounds* old_v=vals_;
+			face_key* old_k=keys_; bool* old_p=present_; bbounds* old_v=vals_;
 			size_t old_n=nbuckets_;
 			alloc_(glpt_next_prime(2*old_n));
 			count_=0;
-			for(size_t i=0;i<old_n;++i) if(old_k[i]!=0) insert_(old_k[i], old_v[i]);
-			std::free(old_k); std::free(old_v);
+			for(size_t i=0;i<old_n;++i) if(old_p[i]) insert_(old_k[i], old_v[i]);
+			std::free(old_k); std::free(old_p); std::free(old_v);
 		}
-		const bbounds& insert_(uint64_t key, const bbounds& val) {
+		const bbounds& insert_(const face_key& key, const bbounds& val) {
 			grow_if_needed_();
-			size_t h = glpt_hash64(key) % nbuckets_;
-			while(keys_[h]!=0) h=(h+1)%nbuckets_;
-			keys_[h]=key; vals_[h]=val;
+			size_t h = glpt_hash_face_key(key) % nbuckets_;
+			while(present_[h]) h=(h+1)%nbuckets_;
+			keys_[h]=key; present_[h]=true; vals_[h]=val;
 			++count_;
 			return vals_[h];
 		}

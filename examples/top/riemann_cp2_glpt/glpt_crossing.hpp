@@ -273,23 +273,31 @@ inline int compute_face_crossing(const pt3 p[3], pt3 out_pts[2], double out_bary
 // file's header comment for why: the same physical 2-face is reached
 // from potentially many different 4-cells, and they must all agree).
 //
-// The key is packed into a SINGLE uint64_t, not a 3-int struct: reuses
-// glpt_vertex_ids.hpp's GLPT_VERTEX_ID_BITS=20 contract (same one
-// glpt_edge_cache packs its own ids into -- user's suggestion,
-// 2026-09-23, after measuring actual vertex counts: 71196 at 1461588
-// leaves, --depth 16 on the conic curve, far under 2^20's headroom) --
-// bit 63 = present (glpt_tree.hpp's own PRESENT_BIT trick), bits
-// [40,60)=a, [20,40)=b, [0,20)=c. This is what actually removes the
-// separate face_key(12 bytes) + bool present(1 byte) arrays the
-// previous open-addressing version still had, folding both into the
-// one 8-byte key array.
-static uint64_t face_key_pack(int a, int b, int c) {
+// face_key: EXACT (no truncation) identity for a sorted vertex-id
+// triple -- hi packs (a,b) as 32+32 bits into one uint64_t, lo holds c
+// as a plain uint32_t, so a,b,c can each range over the FULL 32-bit id
+// space. REVERTED 2026-09-24 from a single-uint64_t 20-bit-per-id
+// packing (see glpt_vertex_ids.hpp's own glpt_edge_cache comment for
+// the full story: a real mesh minted more than 2^20-1 vertices and hit
+// that scheme's own loud assertion). Since face_crossing_cache/
+// bernstein_bounds_cache both need an exact, collision-free key (a
+// hash collision here would silently return the WRONG face's cached
+// crossing data), face_key stays a genuine two-field key, not a single
+// lossy hash -- open addressing (below) still avoids std::map's tree
+// overhead, it just needs an explicit `present` flag per slot again
+// instead of folding it into an unused key bit.
+struct face_key { uint64_t hi; uint32_t lo; };
+inline face_key make_face_key(int a, int b, int c) {
 	int v[3]={a,b,c};
 	for(int i=0;i<3;++i) for(int j=i+1;j<3;++j) if(v[j]<v[i]) { int t=v[i]; v[i]=v[j]; v[j]=t; }
-	assert(uint64_t(v[0])<=GLPT_VERTEX_ID_MASK && uint64_t(v[2])<=GLPT_VERTEX_ID_MASK
-		&& "face_key_pack: a vertex id exceeds the 20-bit capacity shared with glpt_edge_cache");
-	return glpt_edge_cache::PRESENT_BIT
-		| (uint64_t(uint32_t(v[0]))<<40) | (uint64_t(uint32_t(v[1]))<<20) | uint64_t(uint32_t(v[2]));
+	face_key k;
+	k.hi = (uint64_t(uint32_t(v[0]))<<32) | uint32_t(v[1]);
+	k.lo = uint32_t(v[2]);
+	return k;
+}
+inline bool operator==(const face_key& x, const face_key& y) { return x.hi==y.hi && x.lo==y.lo; }
+inline uint64_t glpt_hash_face_key(const face_key& k) {
+	return glpt_hash64(glpt_hash64(k.hi) ^ (uint64_t(k.lo)*0x9E3779B97F4A7C15ULL));
 }
 
 // COMPACT on purpose: unsigned char + int is 8 bytes (with padding),
@@ -327,22 +335,22 @@ struct face_result {
 // one -- exactly mirroring riemann_cp2.cpp's own extra_data<2>/g_roots
 // split, which already solved this for the identical reason there.
 //
-// THIRD fix (this one): the face_key struct (3 plain ints, 12 bytes)
-// plus a separate bool present array -- open addressing alone doesn't
-// help if the key itself is bigger than it needs to be. Packed into the
-// single uint64_t described above (face_key_pack()), matching
-// glpt_edge_cache's own packing exactly.
+// THIRD fix, since superseded (see face_key's own comment above): the
+// face_key struct (3 plain ints, 12 bytes) plus a separate bool present
+// array were packed into a single uint64_t for a while -- reverted back
+// to a genuine (if slightly larger) key + present array once that
+// packing's own 20-bit id ceiling proved too small for a real mesh.
 //
 // No deletion needed here (faces are never forgotten), so this is
 // simpler than glpt_edge_cache's own version -- insert/lookup/grow only.
 class face_crossing_cache {
 	public:
 		explicit face_crossing_cache(size_t initial_buckets = 1031)
-			: keys_(0), results_(0), nbuckets_(0), count_(0)
+			: keys_(0), present_(0), results_(0), nbuckets_(0), count_(0)
 		{
 			alloc_(glpt_next_prime(initial_buckets));
 		}
-		~face_crossing_cache() { std::free(keys_); std::free(results_); }
+		~face_crossing_cache() { std::free(keys_); std::free(present_); std::free(results_); }
 
 		//! Looks up or computes the crossing(s) of face (p[0],p[1],p[2])
 		//! (global ids id[0..2], any order -- canonicalized internally).
@@ -355,7 +363,7 @@ class face_crossing_cache {
 		//! glpt_extraction.hpp to classify a root as sitting on a vertex,
 		//! edge, or the face interior).
 		const face_result& get(const pt3 p[3], const int id[3]) {
-			uint64_t key = face_key_pack(id[0],id[1],id[2]);
+			face_key key = make_face_key(id[0],id[1],id[2]);
 			size_t slot = find_slot_(key);
 			if(slot!=size_t(-1)) return results_[slot];
 
@@ -386,21 +394,23 @@ class face_crossing_cache {
 
 	private:
 		struct bary3 { double l[3]; };
-		uint64_t* keys_;
+		face_key* keys_;
+		bool* present_;
 		face_result* results_;
 		size_t nbuckets_, count_;
 		std::vector<pt3> root_pts_;
 		std::vector<bary3> root_bary_;
 
 		void alloc_(size_t n) {
-			keys_ = (uint64_t*)std::calloc(n,sizeof(uint64_t));
+			keys_ = (face_key*)std::calloc(n,sizeof(face_key));
+			present_ = (bool*)std::calloc(n,sizeof(bool));
 			results_ = (face_result*)std::calloc(n,sizeof(face_result));
-			assert(keys_!=0 && results_!=0 && "face_crossing_cache: out of memory");
+			assert(keys_!=0 && present_!=0 && results_!=0 && "face_crossing_cache: out of memory");
 			nbuckets_ = n;
 		}
-		size_t find_slot_(uint64_t key) const {
-			size_t h = glpt_hash64(key) % nbuckets_;
-			while(keys_[h]!=0) {
+		size_t find_slot_(const face_key& key) const {
+			size_t h = glpt_hash_face_key(key) % nbuckets_;
+			while(present_[h]) {
 				if(keys_[h]==key) return h;
 				h=(h+1)%nbuckets_;
 			}
@@ -408,18 +418,18 @@ class face_crossing_cache {
 		}
 		void grow_if_needed_() {
 			if(double(count_+1) <= 0.7*double(nbuckets_)) return;
-			uint64_t* old_k=keys_; face_result* old_r=results_;
+			face_key* old_k=keys_; bool* old_p=present_; face_result* old_r=results_;
 			size_t old_n=nbuckets_;
 			alloc_(glpt_next_prime(2*old_n));
 			count_=0;
-			for(size_t i=0;i<old_n;++i) if(old_k[i]!=0) insert_(old_k[i], old_r[i]);
-			std::free(old_k); std::free(old_r);
+			for(size_t i=0;i<old_n;++i) if(old_p[i]) insert_(old_k[i], old_r[i]);
+			std::free(old_k); std::free(old_p); std::free(old_r);
 		}
-		const face_result& insert_(uint64_t key, const face_result& val) {
+		const face_result& insert_(const face_key& key, const face_result& val) {
 			grow_if_needed_();
-			size_t h = glpt_hash64(key) % nbuckets_;
-			while(keys_[h]!=0) h=(h+1)%nbuckets_;
-			keys_[h]=key; results_[h]=val;
+			size_t h = glpt_hash_face_key(key) % nbuckets_;
+			while(present_[h]) h=(h+1)%nbuckets_;
+			keys_[h]=key; present_[h]=true; results_[h]=val;
 			++count_;
 			return results_[h];
 		}

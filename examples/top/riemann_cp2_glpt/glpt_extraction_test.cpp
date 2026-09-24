@@ -86,7 +86,10 @@ node_key key_of(const crossing_node& nd) {
 	node_key k; k.dim=nd.dim; k.a=0; k.b=0; k.qparam=0;
 	if(nd.dim==0) { k.a=nd.a; }
 	else if(nd.dim==1) { k.a=nd.a; k.b=nd.b; k.qparam=(long long)(nd.param/CROSSING_MERGE_TOL+0.5); }
-	else { k.a=int(nd.fkey&0xFFFFFFFFu); k.b=int((nd.fkey>>32)&0xFFFFFFFFu); k.qparam=nd.sub; }
+	else {
+		k.a=int(nd.fkey.hi>>32); k.b=int(nd.fkey.hi&0xFFFFFFFFu);
+		k.qparam=(long long)nd.fkey.lo*2+nd.sub;
+	}
 	return k;
 }
 

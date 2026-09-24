@@ -44,7 +44,7 @@ struct crossing_node {
 	int dim; // 0=vertex, 1=edge, 2=face
 	int a,b; // dim==0: a=global vertex id (b unused); dim==1: sorted global vertex id pair
 	double param; // dim==1 only: fraction of the way from a to b
-	uint64_t fkey; int sub; // dim==2 only: packed face key + which root (0/1)
+	face_key fkey; int sub; // dim==2 only: exact packed face key + which root (0/1)
 	pt3 p; // the actual point (for display, and the ntn==4 pairing heuristic)
 };
 
@@ -59,7 +59,7 @@ inline bool same_crossing_node(const crossing_node& x, const crossing_node& y) {
 //! produced this root (face_crossing_cache::get()'s own p[]/id[]
 //! order) -- see this file's own header comment for the identity
 //! construction.
-inline void compute_crossing_node(const int face_ids[3], const double bary[3], uint64_t fkey, int sub, const pt3& p, crossing_node& nd) {
+inline void compute_crossing_node(const int face_ids[3], const double bary[3], const face_key& fkey, int sub, const pt3& p, crossing_node& nd) {
 	double l[3]={bary[0],bary[1],bary[2]};
 	int zeros=0, zi[3];
 	for(int b=0;b<3;++b) if(std::fabs(l[b])<CROSSING_SNAP_TOL) zi[zeros++]=b;
@@ -123,7 +123,7 @@ inline void extract_cell(const pt3 pts[glpt::DIM+1], const int ids[glpt::DIM+1],
 			const face_result& fr = fcache.get(face_pts, face_ids);
 			for(int r=0;r<fr.nroots;++r) {
 				crossing_node nd;
-				compute_crossing_node(face_ids, fcache.root_bary(fr,r), face_key_pack(face_ids[0],face_ids[1],face_ids[2]), r,
+				compute_crossing_node(face_ids, fcache.root_bary(fr,r), make_face_key(face_ids[0],face_ids[1],face_ids[2]), r,
 					fcache.root_point(fr,r), nd);
 				int idx=-1;
 				for(size_t q=0;q<out.nodes.size();++q) if(same_crossing_node(out.nodes[q],nd)) { idx=(int)q; break; }
