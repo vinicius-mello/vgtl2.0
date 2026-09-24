@@ -16,12 +16,14 @@
 // flat (per-polygon best-conditioned affine chart, (Re a, Im a, Re b),
 // clippable via --cutoff) or alpha-tilde (Dutter, arXiv:2608.04323,
 // after Kranich 2015 -- chart-free, bounded by construction, no
-// --cutoff needed). Deliberately NOT ported: the certified
-// Bernstein-Bezier fallback (only needed when every Newton seed misses
-// a root -- matches riemann_cp2.cpp's own behavior before that
-// fallback existed, not a new gap) and riemann_cp2.cpp's --onion mode
-// (flat+alpha are enough to see the extracted surface; onion is
-// deferred, not required).
+// --cutoff needed). Also ports --generic/--generic-seed (random unitary
+// change of basis on C^3, applied once to the 15 Gaifullin seed points
+// -- see random_unitary()'s own comment below). Deliberately NOT
+// ported: the certified Bernstein-Bezier fallback (only needed when
+// every Newton seed misses a root -- matches riemann_cp2.cpp's own
+// behavior before that fallback existed, not a new gap) and
+// riemann_cp2.cpp's --onion mode (flat+alpha are enough to see the
+// extracted surface; onion is deferred, not required).
 
 #include <cstdio>
 #include <cstdlib>
@@ -32,6 +34,7 @@
 #include <queue>
 #include <fstream>
 #include <iostream>
+#include <random>
 #include "glpt_extraction.hpp"
 #include "glpt_tree.hpp"
 
@@ -72,6 +75,40 @@ int pick_chart_polygon(const std::vector<crossing_node>& nodes, const std::vecto
 void flat_projection(const pt3& p, int chart, double out[3]) {
 	cx a,b; dehomogenize(chart,p,a,b);
 	out[0]=a.real(); out[1]=a.imag(); out[2]=b.real();
+}
+
+// --generic/--generic-seed: random unitary change of basis on C^3,
+// applied to the seed mesh's own vertex positions (NOT to F, which is
+// left exactly as catalogued) to break any alignment between the
+// curve's fixed X,Y,Z basis and the seed mesh's own -- copied verbatim
+// from riemann_cp2.cpp's own random_unitary()/apply_unitary() (see
+// that file's comment: 3 of the 15 Gaifullin seed points have TWO
+// homogeneous coordinates equal to 0, a real, non-generic resonance
+// with that basis, and everything basis-dependent downstream
+// (vertex_gradient used by cell_priority, pick_chart/pick_chart_polygon)
+// is evaluated in that same fixed basis).
+void random_unitary(cx M[3][3], unsigned seed) {
+	std::mt19937 rng(seed);
+	std::normal_distribution<double> nd(0.0,1.0);
+	pt3 cols[3];
+	for(int c=0;c<3;++c) {
+		pt3 v;
+		for(int i=0;i<3;++i) v[i]=cx(nd(rng),nd(rng));
+		for(int p=0;p<c;++p) {
+			cx proj=hdot(v,cols[p]); // <v,cols[p]>, cols[p] already unit
+			for(int i=0;i<3;++i) v[i]-=proj*cols[p][i];
+		}
+		cols[c]=normalize3(v);
+	}
+	for(int i=0;i<3;++i) for(int j=0;j<3;++j) M[i][j]=cols[j][i];
+}
+pt3 apply_unitary(const cx M[3][3], const pt3& v) {
+	pt3 r;
+	for(int i=0;i<3;++i) {
+		r[i]=cx(0,0);
+		for(int j=0;j<3;++j) r[i]+=M[i][j]*v[j];
+	}
+	return r;
 }
 
 // --- OBJ output vertex dedup: a crossing_node's identity (see
@@ -167,6 +204,8 @@ int main(int argc, char* argv[]) {
 	// not ported here -- see this file's own header comment).
 	bool alpha_mode=false;
 	double cutoff=1e300;
+	bool generic=false;
+	unsigned generic_seed=12345;
 
 	for(int i=1;i<argc;++i) {
 		string arg=argv[i];
@@ -177,10 +216,12 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--flat") { alpha_mode=false; }
 		else if(arg=="--alpha-projection") { alpha_mode=true; }
 		else if(arg=="--cutoff" && i+1<argc) { cutoff=atof(argv[++i]); }
+		else if(arg=="--generic") { generic=true; }
+		else if(arg=="--generic-seed" && i+1<argc) { generic=true; generic_seed=(unsigned)atoi(argv[++i]); }
 		else if(arg=="--list") { print_function_catalog_cp2(cout); return 0; }
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
-				<<"[--flat] [--alpha-projection] [--cutoff X] [--list]"<<endl;
+				<<"[--flat] [--alpha-projection] [--cutoff X] [--generic] [--generic-seed N] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
 			return 0;
 		}
@@ -192,9 +233,16 @@ int main(int argc, char* argv[]) {
 		return 1;
 	}
 	cout<<"curve: "<<cat[function_idx].name<<" -- "<<cat[function_idx].description<<endl;
+	cout<<"generic="<<(generic?"on":"off");
+	if(generic) cout<<" (seed="<<generic_seed<<")";
+	cout<<endl;
 	set_curve(cat[function_idx].F);
 
 	vector<pt3> gp = gaifullin_points();
+	if(generic) {
+		cx M[3][3]; random_unitary(M,generic_seed);
+		for(size_t i=0;i<gp.size();++i) gp[i]=apply_unitary(M,gp[i]);
+	}
 	glpt_edge_cache id_cache;
 	glpt_tree tree;
 	tree.seed_all_roots();
