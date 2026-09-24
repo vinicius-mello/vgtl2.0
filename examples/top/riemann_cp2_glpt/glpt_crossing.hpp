@@ -8,32 +8,32 @@
  * coordinates -- and the wider conversation this continues).
  *
  * ============================================================
- * SCOPE: WHAT THIS PORTS FROM riemann_cp2.cpp, AND WHAT IT DEFERS
+ * SCOPE: WHAT THIS PORTS FROM riemann_cp2.cpp
  * ============================================================
  * riemann_cp2.cpp's triangle_intersection() does three genuinely
  * separate things: (1) pure numerics on 3 given points and a curve F
  * (pick a well-conditioned chart, dehomogenize, run Newton from a
- * handful of seeds, deduplicate) -- entirely independent of HOW those 3
- * points were obtained; (2) a certified Bernstein-Bezier fallback for
- * the rare case every Newton seed misses; (3) nmt<4>-specific caching
- * (extra_data<2>::computed) so a 2-face shared by many 4-cells is only
- * solved once.
+ * handful of seeds, deduplicate); (2) a certified Bernstein-Bezier
+ * fallback for the rare case every Newton seed misses; (3) nmt<4>-
+ * specific caching (extra_data<2>::computed) so a 2-face shared by many
+ * 4-cells is only solved once.
  *
  * This file ports (1) essentially verbatim (pick_chart, dehomogenize/
  * rehomogenize, the 3 charts' F/Fa/Fb dispatch, tri_frame/
  * build_tri_frame/bary_to_xy, newton_on_triangle, and
  * triangle_intersection's own seed-generation strategy -- a dynamic
- * linear-system seed plus 4 fixed ones), REPLACES (3) with a cache
+ * linear-system seed plus 4 fixed ones), and REPLACES (3) with a cache
  * keyed by the SORTED GLOBAL VERTEX ID TRIPLE of the face (using
  * glpt_vertex_ids.hpp's ids, not an nmt handle) -- which is exactly
  * the consistency mechanism discussed and tested earlier for this same
  * reason (two different 4-cells sharing a face must compute the SAME
- * crossing, not independently re-solve it and risk disagreeing) -- and
- * DEFERS (2): if every Newton seed misses, this reports 0 roots for now,
- * same as riemann_cp2.cpp's own behavior before the Bernstein fallback
- * was added (see project memory riemann_pc2_bernstein_refinement) --
- * matching an already-working, previously-shipped state of that
- * project, not a new gap. Can be added later the same way it was there.
+ * crossing, not independently re-solve it and risk disagreeing). (2),
+ * the certified Bernstein-Bezier fallback, is ADDED by glpt_bernstein.hpp
+ * (--bernstein), via two small function-pointer hooks declared just
+ * above compute_face_crossing() below (g_bernstein_maybe_zero,
+ * g_bernstein_fallback) rather than included directly here -- see that
+ * file's own header comment for why (avoiding a circular dependency).
+ * Both are null by default, so --bernstein off costs one branch.
  *
  * pick_chart, dehomogenize/rehomogenize, the F_chart/Fa_chart/Fb_chart
  * family, real_dot, tri_frame/build_tri_frame/bary_to_xy, and
@@ -173,13 +173,33 @@ inline bool newton_on_triangle(const tri_frame& fr, double x, double y, double& 
 	return true;
 }
 
-//! Core numerics, ported from triangle_intersection() minus the
-//! Bernstein fallback (see this file's header) and minus any caching
+// --bernstein hooks (see glpt_bernstein.hpp for the real implementation
+// and the full rationale): both null by default (--bernstein off, one
+// branch of overhead), set by glpt_bernstein.hpp's enable_bernstein()
+// only when that mode is actually on. Kept as function pointers rather
+// than #including glpt_bernstein.hpp here to avoid a circular
+// dependency -- glpt_bernstein.hpp itself needs THIS file's pick_chart/
+// dehomogenize/build_tri_frame/bary_to_xy/newton_on_triangle/g_F.
+// g_bernstein_maybe_zero: certified "can this face contain a zero at
+// all?" test, checked by face_crossing_cache::get() BEFORE running any
+// Newton search -- a true "certified empty" skip, not a heuristic.
+// g_bernstein_fallback: a certified fallback SEED for Newton (not a
+// replacement for it), tried by compute_face_crossing only when every
+// fixed/dynamic seed already missed.
+typedef bool (*bernstein_maybe_zero_fn)(const pt3 p[3], const int id[3]);
+typedef bool (*bernstein_fallback_fn)(const pt3 p[3], int chart, double& out_l1, double& out_l2);
+bernstein_maybe_zero_fn g_bernstein_maybe_zero = 0;
+bernstein_fallback_fn g_bernstein_fallback = 0;
+long g_bernstein_pruned_faces = 0; // diagnostic: faces Newton never had to touch
+long g_bfallback_tried = 0, g_bfallback_new_root = 0; // fallback diagnostics
+
+//! Core numerics, ported from triangle_intersection() minus the caching
 //! (that's face_crossing_cache's job, below): given 3 points, finds up
 //! to 2 curve crossings via Newton from a dynamic + 4 fixed seeds,
-//! deduplicated. Returns how many were found (0, 1, or 2); out_pts and
-//! out_bary (barycentric relative to p[0],p[1],p[2] in the GIVEN order)
-//! are filled for that many entries.
+//! deduplicated, falling back to g_bernstein_fallback (if set) only
+//! when every one of those seeds misses. Returns how many were found
+//! (0, 1, or 2); out_pts and out_bary (barycentric relative to
+//! p[0],p[1],p[2] in the GIVEN order) are filled for that many entries.
 inline int compute_face_crossing(const pt3 p[3], pt3 out_pts[2], double out_bary[2][3]) {
 	int chart=pick_chart(p);
 	cx w0,w1,w2,z0,z1,z2;
@@ -225,6 +245,26 @@ inline int compute_face_crossing(const pt3 p[3], pt3 out_pts[2], double out_bary
 		cx aroot=ol0*w0+ol1*w1+ol2*w2, broot=ol0*z0+ol1*z1+ol2*z2;
 		out_pts[nfound]=rehomogenize(chart,aroot,broot);
 		++nfound;
+	}
+
+	// Certified fallback (see glpt_bernstein.hpp's own comment on
+	// bernstein_locate_root): only tried when every fixed/dynamic seed
+	// above missed entirely.
+	if(nfound==0 && g_bernstein_fallback) {
+		++g_bfallback_tried;
+		double bl1,bl2;
+		if(g_bernstein_fallback(p, chart, bl1, bl2)) {
+			double sx,sy; bary_to_xy(fr,bl1,bl2,sx,sy);
+			double ol1,ol2,rF,rG; int riter;
+			if(newton_on_triangle(fr,sx,sy,ol1,ol2,Ffun,Fwfun,Fzfun,rF,rG,riter)) {
+				++g_bfallback_new_root;
+				double ol0=1.0-ol1-ol2;
+				out_bary[0][0]=ol0; out_bary[0][1]=ol1; out_bary[0][2]=ol2;
+				cx aroot=ol0*w0+ol1*w1+ol2*w2, broot=ol0*z0+ol1*z1+ol2*z2;
+				out_pts[0]=rehomogenize(chart,aroot,broot);
+				nfound=1;
+			}
+		}
 	}
 	return nfound;
 }
@@ -318,6 +358,16 @@ class face_crossing_cache {
 			uint64_t key = face_key_pack(id[0],id[1],id[2]);
 			size_t slot = find_slot_(key);
 			if(slot!=size_t(-1)) return results_[slot];
+
+			// --bernstein: certified "can't contain a zero" skip -- Newton
+			// never has to run at all here (see glpt_bernstein.hpp's own
+			// comment on g_bernstein_maybe_zero).
+			if(g_bernstein_maybe_zero && !g_bernstein_maybe_zero(p,id)) {
+				++g_bernstein_pruned_faces;
+				face_result fr; fr.nroots=0; fr.root_idx=-1;
+				return insert_(key, fr);
+			}
+
 			face_result fr;
 			pt3 out_pts[2]; double out_bary[2][3];
 			int nr = compute_face_crossing(p, out_pts, out_bary);

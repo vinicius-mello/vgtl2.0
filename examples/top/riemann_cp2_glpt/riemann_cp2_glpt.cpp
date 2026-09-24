@@ -18,14 +18,16 @@
 // after Kranich 2015 -- chart-free, bounded by construction, no
 // --cutoff needed). Also ports --generic/--generic-seed (random unitary
 // change of basis on C^3, applied once to the 15 Gaifullin seed points
-// -- see random_unitary()'s own comment below) and --proximity (extra
+// -- see random_unitary()'s own comment below), --proximity (extra
 // diam/(mind+diam) factor on cell_priority, biasing refinement toward
-// the curve itself -- see g_proximity's own comment below). Deliberately
-// NOT ported: the certified Bernstein-Bezier fallback (only needed when
-// every Newton seed misses a root -- matches riemann_cp2.cpp's own
-// behavior before that fallback existed, not a new gap) and
-// riemann_cp2.cpp's --onion mode (flat+alpha are enough to see the
-// extracted surface; onion is deferred, not required).
+// the curve itself -- see g_proximity's own comment below), and
+// --bernstein/--bernstein-level/--bernstein-selftest (certified
+// Bernstein-Bezier enclosure per 2-face, both pruning cells that
+// provably can't contain a zero and seeding Newton when every ordinary
+// seed misses -- see glpt_bernstein.hpp's own header comment).
+// Deliberately NOT ported: riemann_cp2.cpp's --onion mode (flat+alpha
+// are enough to see the extracted surface; onion is deferred, not
+// required).
 
 #include <cstdio>
 #include <cstdlib>
@@ -38,6 +40,7 @@
 #include <iostream>
 #include <random>
 #include "glpt_extraction.hpp"
+#include "glpt_bernstein.hpp"
 #include "glpt_tree.hpp"
 
 using namespace std;
@@ -155,6 +158,32 @@ pt3 vertex_gradient(const pt3& p) {
 }
 cx vertex_Fval(const pt3& p) { return eval_poly3(g_F,p[0],p[1],p[2]); }
 
+// Shared by cell_priority's own --proximity branch and
+// cell_priority_bernstein (below): the cell's own Fubini-Study
+// diameter, and (proximity_factor) the diam/(mind+diam) factor itself,
+// mind=min over the cell's own vertices of the first-order distance-
+// to-curve estimate |F(v)|/|gradF(v)| -- copied verbatim in spirit
+// from riemann_cp2.cpp's own cell_diam()/proximity_factor().
+double cell_diam(const pt3 pts[glpt::DIM+1]) {
+	double diam=0;
+	for(int i=0;i<=glpt::DIM;++i)
+		for(int j=i+1;j<=glpt::DIM;++j)
+			diam=std::max(diam,fs_dist(pts[i],pts[j]));
+	return diam;
+}
+double proximity_factor(const pt3 pts[glpt::DIM+1]) {
+	double mind=1e300;
+	for(int i=0;i<=glpt::DIM;++i) {
+		pt3 g=vertex_gradient(pts[i]);
+		double gn=hnorm(g);
+		if(gn<1e-12) continue;
+		double dv=std::abs(vertex_Fval(pts[i]))/gn;
+		if(dv<mind) mind=dv;
+	}
+	double diam=cell_diam(pts);
+	return diam/(mind+diam);
+}
+
 // --proximity: optional extra factor biasing refinement toward the
 // curve itself (gradient dispersion alone is a global signal, evaluated
 // identically whether or not a cell is anywhere near F=0) -- copied
@@ -185,13 +214,96 @@ double cell_priority(const pt3 pts[glpt::DIM+1]) {
 	double kappa = S/(double(n)*double(n));
 	double priority = 1.0-kappa;
 	if(g_proximity) {
-		double diam=0;
-		for(int i=0;i<=glpt::DIM;++i)
-			for(int j=i+1;j<=glpt::DIM;++j)
-				diam=std::max(diam,fs_dist(pts[i],pts[j]));
+		double diam=cell_diam(pts);
 		priority *= diam/(mind+diam);
 	}
 	return priority;
+}
+
+// --- Bernstein-certified refinement/pruning (--bernstein), a second,
+// independent refinement criterion alongside gradient dispersion above
+// -- ported from riemann_cp2.cpp's own cell_priority_bernstein() (see
+// that file's comment): the widest candidate face box among a cell's
+// 10 distinct 2-faces (glpt_crossing.hpp's own GLPT_CELL_FACES) that
+// bernstein_bounds_cache can't certify empty, or -1 (a sentinel meaning
+// "certified empty -- drop this cell, never refine it again") if none
+// of them can contain a zero. Divides by the cell's own diameter for
+// the same reason --proximity does (raw box width isn't comparable
+// across refinement levels -- see that file's own comment on
+// cell_priority_bernstein), and, like ordinary cell_priority, can be
+// further scaled by --proximity's own diam/(mind+diam) factor.
+double cell_priority_bernstein(const pt3 pts[glpt::DIM+1], const int ids[glpt::DIM+1], bernstein_bounds_cache& bcache) {
+	double best=-1.0;
+	for(int f=0; f<10; ++f) {
+		pt3 face_pts[3]; int face_ids[3];
+		for(int k=0;k<3;++k) { face_pts[k]=pts[GLPT_CELL_FACES[f][k]]; face_ids[k]=ids[GLPT_CELL_FACES[f][k]]; }
+		const bernstein_bounds_cache::bbounds& b = bcache.get(face_pts, face_ids);
+		if(bernstein_bounds_cache::maybe_zero(b)) {
+			double w=(b.reHi-b.reLo)+(b.imHi-b.imLo);
+			if(w>best) best=w;
+		}
+	}
+	if(best>=0) {
+		double diam=cell_diam(pts);
+		if(diam>1e-12) best/=diam;
+		if(g_proximity) best*=proximity_factor(pts);
+	}
+	return best;
+}
+
+// --bernstein-selftest: direct numerical verification, independent of
+// the mesh, that (a) level-0 and level-1 enclosures both actually
+// contain the TRUE range of Re(F)/Im(F) over a triangle's own CHART
+// domain (the same one compute_face_crossing searches), sampled by
+// brute force, and (b) level-1's box is a subset of level-0's
+// (mathematically required: subdivision only tightens). Copied
+// verbatim in spirit from riemann_cp2.cpp's own bernstein_selftest().
+void bernstein_selftest() {
+	pt3 P0=normalize3(mkpt(cx(1,0),cx(0.3,0.1),cx(-0.2,0.4)));
+	pt3 P1=normalize3(mkpt(cx(0.2,-0.5),cx(1,0),cx(0.1,0.3)));
+	pt3 P2=normalize3(mkpt(cx(-0.3,0.2),cx(0.4,-0.1),cx(1,0)));
+	pt3 p[3]={P0,P1,P2};
+	int chart=pick_chart(p);
+	cpt Q0,Q1,Q2;
+	dehomogenize(chart,P0,Q0.a,Q0.b);
+	dehomogenize(chart,P1,Q1.a,Q1.b);
+	dehomogenize(chart,P2,Q2.a,Q2.b);
+
+	double l0Lo,l0Hi,i0Lo,i0Hi, l1Lo,l1Hi,i1Lo,i1Hi;
+	bernstein_bounds_recursive(g_F,chart,Q0,Q1,Q2,0,l0Lo,l0Hi,i0Lo,i0Hi);
+	bernstein_bounds_recursive(g_F,chart,Q0,Q1,Q2,1,l1Lo,l1Hi,i1Lo,i1Hi);
+
+	double trueReLo=1e300,trueReHi=-1e300,trueImLo=1e300,trueImHi=-1e300;
+	mt19937 rng(1);
+	uniform_real_distribution<double> ud(0.0,1.0);
+	int N=2000000;
+	for(int s=0;s<N;++s) {
+		double u=ud(rng), v=ud(rng);
+		if(u+v>1.0) { u=1.0-u; v=1.0-v; }
+		double L0=1.0-u-v, L1=u, L2=v;
+		cx a=L0*Q0.a+L1*Q1.a+L2*Q2.a;
+		cx b=L0*Q0.b+L1*Q1.b+L2*Q2.b;
+		pt3 P=rehomogenize(chart,a,b);
+		cx val=eval_poly3(g_F,P[0],P[1],P[2]);
+		double re=val.real(), im=val.imag();
+		if(re<trueReLo) trueReLo=re; if(re>trueReHi) trueReHi=re;
+		if(im<trueImLo) trueImLo=im; if(im>trueImHi) trueImHi=im;
+	}
+
+	cout<<"chart: "<<chart<<endl;
+	cout<<"level 0 box:  Re["<<l0Lo<<","<<l0Hi<<"]  Im["<<i0Lo<<","<<i0Hi<<"]"<<endl;
+	cout<<"level 1 box:  Re["<<l1Lo<<","<<l1Hi<<"]  Im["<<i1Lo<<","<<i1Hi<<"]"<<endl;
+	cout<<"true range (brute force, "<<N<<" samples): Re["<<trueReLo<<","<<trueReHi
+			<<"]  Im["<<trueImLo<<","<<trueImHi<<"]"<<endl;
+
+	bool ok=true;
+	if(!(l0Lo<=trueReLo+1e-9 && l0Hi>=trueReHi-1e-9)) { cout<<"FAIL: level-0 Re doesn't enclose true range"<<endl; ok=false; }
+	if(!(i0Lo<=trueImLo+1e-9 && i0Hi>=trueImHi-1e-9)) { cout<<"FAIL: level-0 Im doesn't enclose true range"<<endl; ok=false; }
+	if(!(l1Lo<=trueReLo+1e-9 && l1Hi>=trueReHi-1e-9)) { cout<<"FAIL: level-1 Re doesn't enclose true range"<<endl; ok=false; }
+	if(!(i1Lo<=trueImLo+1e-9 && i1Hi>=trueImHi-1e-9)) { cout<<"FAIL: level-1 Im doesn't enclose true range"<<endl; ok=false; }
+	if(!(l1Lo>=l0Lo-1e-9 && l1Hi<=l0Hi+1e-9)) { cout<<"FAIL: level-1 Re box is not a subset of level-0's"<<endl; ok=false; }
+	if(!(i1Lo>=i0Lo-1e-9 && i1Hi<=i0Hi+1e-9)) { cout<<"FAIL: level-1 Im box is not a subset of level-0's"<<endl; ok=false; }
+	cout<<(ok?"ALL CHECKS PASSED":"CHECKS FAILED")<<endl;
 }
 
 // --- Cell vertex points/ids, computed from scratch via the cell's own
@@ -230,6 +342,7 @@ int main(int argc, char* argv[]) {
 	double cutoff=1e300;
 	bool generic=false;
 	unsigned generic_seed=12345;
+	bool bernstein_selftest_flag=false;
 
 	for(int i=1;i<argc;++i) {
 		string arg=argv[i];
@@ -243,10 +356,14 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--generic") { generic=true; }
 		else if(arg=="--generic-seed" && i+1<argc) { generic=true; generic_seed=(unsigned)atoi(argv[++i]); }
 		else if(arg=="--proximity") { g_proximity=true; }
+		else if(arg=="--bernstein") { g_bernstein=true; }
+		else if(arg=="--bernstein-level" && i+1<argc) { g_bernstein=true; g_bernstein_level=atoi(argv[++i]); }
+		else if(arg=="--bernstein-selftest") { bernstein_selftest_flag=true; }
 		else if(arg=="--list") { print_function_catalog_cp2(cout); return 0; }
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
-				<<"[--flat] [--alpha-projection] [--cutoff X] [--generic] [--generic-seed N] [--proximity] [--list]"<<endl;
+				<<"[--flat] [--alpha-projection] [--cutoff X] [--generic] [--generic-seed N] [--proximity] "
+				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
 			return 0;
 		}
@@ -257,11 +374,23 @@ int main(int argc, char* argv[]) {
 		cerr<<"bad --function index "<<function_idx<<" (--list to see the catalog)"<<endl;
 		return 1;
 	}
+	set_curve(cat[function_idx].F);
+
+	if(bernstein_selftest_flag) {
+		bernstein_selftest();
+		return 0;
+	}
+
 	cout<<"curve: "<<cat[function_idx].name<<" -- "<<cat[function_idx].description<<endl;
 	cout<<"generic="<<(generic?"on":"off");
 	if(generic) cout<<" (seed="<<generic_seed<<")";
-	cout<<"  proximity="<<(g_proximity?"on":"off")<<endl;
-	set_curve(cat[function_idx].F);
+	cout<<"  proximity="<<(g_proximity?"on":"off");
+	cout<<"  bernstein="<<(g_bernstein?"on":"off");
+	if(g_bernstein) cout<<" (level="<<g_bernstein_level<<")";
+	cout<<endl;
+
+	bernstein_bounds_cache bcache;
+	if(g_bernstein) enable_bernstein(bcache);
 
 	vector<pt3> gp = gaifullin_points();
 	if(generic) {
@@ -273,14 +402,19 @@ int main(int argc, char* argv[]) {
 	tree.seed_all_roots();
 	cout<<"seeded "<<tree.leaf_count()<<" root cells"<<endl;
 
-	// --- Phase 1: adaptive refinement (priority-queue, gradient dispersion) --
+	// --- Phase 1: adaptive refinement (priority-queue, gradient dispersion,
+	// or --bernstein's certified enclosure test -- see cell_priority vs
+	// cell_priority_bernstein above) --
 	cout<<endl<<"--- adaptive refinement ---"<<endl;
 	priority_queue<pair<double,glpt> > pq;
+	int ndropped=0;
 	for(int s=0;s<GLPT_NCELLS;++s) {
 		pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
 		glpt c(s);
 		cell_points_and_ids(c, gp, id_cache, pts, ids);
-		pq.push(make_pair(cell_priority(pts), c));
+		double p = g_bernstein ? cell_priority_bernstein(pts,ids,bcache) : cell_priority(pts);
+		if(g_bernstein && p<0) { ++ndropped; continue; } // certified empty
+		pq.push(make_pair(p, c));
 	}
 	int nsubdivisions=0;
 	while(!pq.empty()) {
@@ -297,10 +431,13 @@ int main(int argc, char* argv[]) {
 			if(!tree.exists(recent[i])) continue; // superseded later in this same cascade -- see recent_leaves()'s own comment
 			pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
 			cell_points_and_ids(recent[i], gp, id_cache, pts, ids);
-			pq.push(make_pair(cell_priority(pts), recent[i]));
+			double p = g_bernstein ? cell_priority_bernstein(pts,ids,bcache) : cell_priority(pts);
+			if(g_bernstein && p<0) { ++ndropped; continue; }
+			pq.push(make_pair(p, recent[i]));
 		}
 	}
 	cout<<"subdivisions performed: "<<nsubdivisions<<endl;
+	if(g_bernstein) cout<<"cells certified empty (dropped, never refined): "<<ndropped<<endl;
 	cout<<"final leaf count: "<<tree.leaf_count()<<endl;
 	cout<<"distinct vertices minted: "<<id_cache.next_id()<<" ("<<GLPT_BASE_VERTEX_COUNT<<" base + "
 		<<(id_cache.next_id()-GLPT_BASE_VERTEX_COUNT)<<" from bisection)"<<endl;
@@ -407,12 +544,15 @@ int main(int argc, char* argv[]) {
 	tree.for_each_leaf(ext);
 
 	cout<<"cells visited: "<<n_cells_visited<<", distinct faces solved: "<<fcache.size()<<endl;
+	if(g_bernstein) cout<<"faces Bernstein-pruned (Newton skipped, certified no root): "<<g_bernstein_pruned_faces<<endl;
 	cout<<"extracted cells: ok="<<ok_cells<<" bad="<<bad_cells<<endl;
 	cout<<"polygon sizes:";
 	for(int sz=3;sz<8;++sz) if(npoly_out[sz]) cout<<" "<<sz<<"-gon="<<npoly_out[sz];
 	cout<<endl;
 	cout<<"touching tetrahedra: "<<ntouching_tets<<"  unhandled node count: "<<nbad_tets<<endl;
 	if(!alpha_mode && cutoff<1e299) cout<<"polygons dropped by --cutoff: "<<nclipped<<endl;
+	if(g_bernstein) cout<<"Bernstein fallback seeds used: "<<g_bfallback_tried<<" faces tried, "
+		<<g_bfallback_new_root<<" found a root the fixed/dynamic seeds missed"<<endl;
 
 	// --- Phase 3: output (OBJ mesh) --
 	ofstream out(obj_path.c_str());
