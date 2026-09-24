@@ -18,8 +18,10 @@
 // after Kranich 2015 -- chart-free, bounded by construction, no
 // --cutoff needed). Also ports --generic/--generic-seed (random unitary
 // change of basis on C^3, applied once to the 15 Gaifullin seed points
-// -- see random_unitary()'s own comment below). Deliberately NOT
-// ported: the certified Bernstein-Bezier fallback (only needed when
+// -- see random_unitary()'s own comment below) and --proximity (extra
+// diam/(mind+diam) factor on cell_priority, biasing refinement toward
+// the curve itself -- see g_proximity's own comment below). Deliberately
+// NOT ported: the certified Bernstein-Bezier fallback (only needed when
 // every Newton seed misses a root -- matches riemann_cp2.cpp's own
 // behavior before that fallback existed, not a new gap) and
 // riemann_cp2.cpp's --onion mode (flat+alpha are enough to see the
@@ -151,13 +153,27 @@ pt3 vertex_gradient(const pt3& p) {
 	g[2]=eval_poly3(g_Fz,p[0],p[1],p[2]);
 	return g;
 }
+cx vertex_Fval(const pt3& p) { return eval_poly3(g_F,p[0],p[1],p[2]); }
+
+// --proximity: optional extra factor biasing refinement toward the
+// curve itself (gradient dispersion alone is a global signal, evaluated
+// identically whether or not a cell is anywhere near F=0) -- copied
+// verbatim in spirit from riemann_cp2.cpp's own cell_priority() (see
+// that file's own comment on g_proximity for the full derivation of
+// diam/(mind+diam)).
+bool g_proximity=false;
 double cell_priority(const pt3 pts[glpt::DIM+1]) {
 	pt3 ghat[glpt::DIM+1];
 	int n=0;
+	double mind=1e300;
 	for(int i=0;i<=glpt::DIM;++i) {
 		pt3 g = vertex_gradient(pts[i]);
 		double gn = hnorm(g);
 		if(gn<1e-12) continue; // near a singular point: can't normalize
+		if(g_proximity) {
+			double dv=std::abs(vertex_Fval(pts[i]))/gn;
+			if(dv<mind) mind=dv;
+		}
 		for(int c=0;c<3;++c) g[c]/=gn;
 		ghat[n++]=g;
 	}
@@ -167,7 +183,15 @@ double cell_priority(const pt3 pts[glpt::DIM+1]) {
 		for(int j=0;j<n;++j)
 			S += std::norm(hdot(ghat[i],ghat[j]));
 	double kappa = S/(double(n)*double(n));
-	return 1.0-kappa;
+	double priority = 1.0-kappa;
+	if(g_proximity) {
+		double diam=0;
+		for(int i=0;i<=glpt::DIM;++i)
+			for(int j=i+1;j<=glpt::DIM;++j)
+				diam=std::max(diam,fs_dist(pts[i],pts[j]));
+		priority *= diam/(mind+diam);
+	}
+	return priority;
 }
 
 // --- Cell vertex points/ids, computed from scratch via the cell's own
@@ -218,10 +242,11 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--cutoff" && i+1<argc) { cutoff=atof(argv[++i]); }
 		else if(arg=="--generic") { generic=true; }
 		else if(arg=="--generic-seed" && i+1<argc) { generic=true; generic_seed=(unsigned)atoi(argv[++i]); }
+		else if(arg=="--proximity") { g_proximity=true; }
 		else if(arg=="--list") { print_function_catalog_cp2(cout); return 0; }
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
-				<<"[--flat] [--alpha-projection] [--cutoff X] [--generic] [--generic-seed N] [--list]"<<endl;
+				<<"[--flat] [--alpha-projection] [--cutoff X] [--generic] [--generic-seed N] [--proximity] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
 			return 0;
 		}
@@ -235,7 +260,7 @@ int main(int argc, char* argv[]) {
 	cout<<"curve: "<<cat[function_idx].name<<" -- "<<cat[function_idx].description<<endl;
 	cout<<"generic="<<(generic?"on":"off");
 	if(generic) cout<<" (seed="<<generic_seed<<")";
-	cout<<endl;
+	cout<<"  proximity="<<(g_proximity?"on":"off")<<endl;
 	set_curve(cat[function_idx].F);
 
 	vector<pt3> gp = gaifullin_points();
