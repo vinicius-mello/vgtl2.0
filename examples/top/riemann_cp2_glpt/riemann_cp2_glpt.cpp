@@ -24,7 +24,10 @@
 // --bernstein/--bernstein-level/--bernstein-selftest (certified
 // Bernstein-Bezier enclosure per 2-face, both pruning cells that
 // provably can't contain a zero and seeding Newton when every ordinary
-// seed misses -- see glpt_bernstein.hpp's own header comment).
+// seed misses -- see glpt_bernstein.hpp's own header comment). Also
+// has an experimental --repair-rounds/--repair-extra-depth (not in
+// riemann_cp2.cpp): force-refines specifically the cells extraction
+// failed on, then re-extracts -- see that flag's own comment below.
 // Deliberately NOT ported: riemann_cp2.cpp's --onion mode (flat+alpha
 // are enough to see the extracted surface; onion is deferred, not
 // required).
@@ -351,6 +354,8 @@ int main(int argc, char* argv[]) {
 	bool generic=false;
 	unsigned generic_seed=12345;
 	bool bernstein_selftest_flag=false;
+	int repair_rounds=0;
+	int repair_extra_depth=4;
 
 	for(int i=1;i<argc;++i) {
 		string arg=argv[i];
@@ -367,11 +372,14 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--bernstein") { g_bernstein=true; }
 		else if(arg=="--bernstein-level" && i+1<argc) { g_bernstein=true; g_bernstein_level=atoi(argv[++i]); }
 		else if(arg=="--bernstein-selftest") { bernstein_selftest_flag=true; }
+		else if(arg=="--repair-rounds" && i+1<argc) { repair_rounds=atoi(argv[++i]); }
+		else if(arg=="--repair-extra-depth" && i+1<argc) { repair_extra_depth=atoi(argv[++i]); }
 		else if(arg=="--list") { print_function_catalog_cp2(cout); return 0; }
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
 				<<"[--flat] [--alpha-projection] [--cutoff X] [--generic] [--generic-seed N] [--proximity] "
-				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--list]"<<endl;
+				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] "
+				<<"[--repair-rounds N] [--repair-extra-depth N] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
 			return 0;
 		}
@@ -495,6 +503,7 @@ int main(int argc, char* argv[]) {
 		bool alpha_mode; double cutoff;
 		vector<pt3>* vpts; map<node_key,int>* vidx; vector<vector<int> >* faces;
 		vector<vec3d>* fverts; vector<vector<int> >* ffaces;
+		vector<glpt>* bad_list; // --repair-rounds: which leaves failed to extract, for possible re-refinement
 
 		int emit(const crossing_node& nd) const {
 			node_key k = key_of(nd);
@@ -514,7 +523,7 @@ int main(int argc, char* argv[]) {
 			if(!res.any_edge) return; // curve doesn't cross this cell at all -- not a failure, nothing to count
 			*ntouch += res.ntouching_tets;
 			*nbad_t += res.nbad_tets;
-			if(!res.decompose_ok) { ++(*bad); return; }
+			if(!res.decompose_ok) { ++(*bad); if(bad_list) bad_list->push_back(c); return; }
 			++(*ok);
 			for(size_t p=0;p<res.cycles.size();++p) {
 				const vector<int>& cyc = res.cycles[p];
@@ -543,13 +552,54 @@ int main(int argc, char* argv[]) {
 			}
 		}
 	};
+	vector<glpt> bad_list;
 	Extractor ext;
 	ext.gp=&gp; ext.idc=&id_cache; ext.fc=&fcache; ext.n_cells=&n_cells_visited;
 	ext.ok=&ok_cells; ext.bad=&bad_cells; ext.ntouch=&ntouching_tets; ext.nbad_t=&nbad_tets; ext.npoly=npoly_out;
 	ext.nclip=&nclipped; ext.alpha_mode=alpha_mode; ext.cutoff=cutoff;
 	ext.vpts=&vert_pts; ext.vidx=&vert_index; ext.faces=&faces_out;
-	ext.fverts=&flat_verts; ext.ffaces=&flat_faces;
+	ext.fverts=&flat_verts; ext.ffaces=&flat_faces; ext.bad_list=&bad_list;
 	tree.for_each_leaf(ext);
+
+	// --repair-rounds: an experiment (user's own idea, revisited --
+	// "já tentamos isso antes, mas vale tentar de novo" 2026-09-24):
+	// bad cells are never specifically targeted for MORE refinement --
+	// Phase 1 only refines by cell_priority/proximity/threshold, so a
+	// cell whose LOCAL crossing pattern doesn't fit extract_cell()'s
+	// pairing assumptions (near-tangency, multiple close crossings on
+	// one facet, ...) just stays bad forever, however deep its
+	// neighbors go. This forces exactly those cells (and only those) to
+	// bisect further -- up to max_depth+repair_extra_depth, a separate,
+	// deliberately generous budget, since a cell already at max_depth
+	// after Phase 1 needs genuine EXTRA room to have any chance of
+	// resolving -- then re-extracts the WHOLE mesh fresh (simplest
+	// correct approach; not the cheapest, but repair mode is opt-in and
+	// meant for exploring whether this helps at all, not production
+	// use). Known NOT to be a complete fix by itself: some bad
+	// configurations (genuine tangency, a crossing sitting exactly on a
+	// shared lower-dimensional stratum) don't resolve at ANY depth --
+	// see glpt_extraction.hpp's own accepted-degeneracy discussion and
+	// [[riemann_glpt_pointerless_mesh]] memory.
+	for(int round=0; round<repair_rounds && !bad_list.empty(); ++round) {
+		int nrepaired=0;
+		for(size_t i=0;i<bad_list.size();++i) {
+			glpt c = bad_list[i];
+			if(!tree.exists(c)) continue; // already refined via a different path, or superseded
+			if(c.simplex_level()>=max_depth+repair_extra_depth) continue;
+			tree.compat_bisect(c);
+			++nrepaired;
+		}
+		cout<<"repair round "<<(round+1)<<": "<<bad_list.size()<<" bad cells, "<<nrepaired<<" bisected further"<<endl;
+		if(nrepaired==0) break; // every bad cell already maxed out -- no point re-extracting
+
+		n_cells_visited=0; ok_cells=0; bad_cells=0; ntouching_tets=0; nbad_tets=0; nclipped=0;
+		for(int sz=0;sz<8;++sz) npoly_out[sz]=0;
+		vert_pts.clear(); vert_index.clear(); faces_out.clear();
+		flat_verts.clear(); flat_faces.clear();
+		bad_list.clear();
+		tree.for_each_leaf(ext);
+	}
+	if(repair_rounds>0) cout<<"after repair: bad cells remaining: "<<bad_cells<<endl;
 
 	cout<<"cells visited: "<<n_cells_visited<<", distinct faces solved: "<<fcache.size()<<endl;
 	if(g_bernstein) cout<<"faces Bernstein-pruned (Newton skipped, certified no root): "<<g_bernstein_pruned_faces<<endl;
