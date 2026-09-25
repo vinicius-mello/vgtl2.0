@@ -5,9 +5,17 @@
 // O(1)-per-current-cell mesh, ~/code/lpt/glpt_tree.hpp, replacing
 // riemann_cp2.cpp's append-only nmt<4>-backed one).
 //
-// Seeds all 108 Gaifullin cells, refines by the SAME gradient-dispersion
-// cell_priority as riemann_cp2.cpp (ported below) through a priority-
-// queue loop driven by glpt_tree::compat_bisect()/recent_leaves(), then
+// Seeds all 108 Gaifullin cells, then refines by CONTINUATION (default):
+// find one root the curve certainly touches (extract_cell()'s own
+// any_edge test, not a proxy), then explore outward through only the
+// touched cells via glpt_tree::compat_bisect()/recent_leaves() (down to
+// --depth) and glpt_tree::neighbor_leaf() (across cells already at
+// --depth) -- see Phase 1's own comment below and
+// [[riemann_glpt_continuation]] for why this reaches the exact same
+// cells as a global scan, for a fraction of the mesh size, on a
+// CONNECTED curve. --legacy-priority-refine restores the ORIGINAL
+// global gradient-dispersion cell_priority priority-queue refinement
+// (ported from riemann_cp2.cpp), kept for comparison. Either way,
 // extracts actual connected polygons per cell (glpt_extraction.hpp's
 // extract_cell(), a faithful port of riemann_cp2.cpp's own Phase-3
 // per-cell graph-building + cycle-decomposition loop) and writes them
@@ -20,7 +28,9 @@
 // change of basis on C^3, applied once to the 15 Gaifullin seed points
 // -- see random_unitary()'s own comment below), --proximity (extra
 // diam/(mind+diam) factor on cell_priority, biasing refinement toward
-// the curve itself -- see g_proximity's own comment below), and
+// the curve itself -- see g_proximity's own comment below; only has an
+// effect under --legacy-priority-refine, since continuation is already
+// gated on the curve's actual presence), and
 // --bernstein/--bernstein-level/--bernstein-selftest (certified
 // Bernstein-Bezier enclosure per 2-face, both pruning cells that
 // provably can't contain a zero and seeding Newton when every ordinary
@@ -38,6 +48,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <queue>
 #include <fstream>
 #include <iostream>
@@ -356,6 +367,7 @@ int main(int argc, char* argv[]) {
 	bool bernstein_selftest_flag=false;
 	int repair_rounds=0;
 	int repair_extra_depth=4;
+	bool legacy_priority_refine=false;
 
 	for(int i=1;i<argc;++i) {
 		string arg=argv[i];
@@ -374,16 +386,20 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--bernstein-selftest") { bernstein_selftest_flag=true; }
 		else if(arg=="--repair-rounds" && i+1<argc) { repair_rounds=atoi(argv[++i]); }
 		else if(arg=="--repair-extra-depth" && i+1<argc) { repair_extra_depth=atoi(argv[++i]); }
+		else if(arg=="--legacy-priority-refine") { legacy_priority_refine=true; }
 		else if(arg=="--list") { print_function_catalog_cp2(cout); return 0; }
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
 				<<"[--flat] [--alpha-projection] [--cutoff X] [--generic] [--generic-seed N] [--proximity] "
 				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] "
-				<<"[--repair-rounds N] [--repair-extra-depth N] [--list]"<<endl;
+				<<"[--repair-rounds N] [--repair-extra-depth N] [--legacy-priority-refine] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
 			return 0;
 		}
 	}
+	if(g_proximity && !legacy_priority_refine)
+		cerr<<"note: --proximity has no effect under the default continuation refinement "
+			<<"(no priority queue) -- pass --legacy-priority-refine to use it"<<endl;
 
 	vector<catalog_entry_cp2>& cat = function_catalog_cp2();
 	if(function_idx<0 || function_idx>=(int)cat.size()) {
@@ -418,42 +434,113 @@ int main(int argc, char* argv[]) {
 	tree.seed_all_roots();
 	cout<<"seeded "<<tree.leaf_count()<<" root cells"<<endl;
 
-	// --- Phase 1: adaptive refinement (priority-queue, gradient dispersion,
-	// or --bernstein's certified enclosure test -- see cell_priority vs
-	// cell_priority_bernstein above) --
+	// --- Phase 1: adaptive refinement --
+	//
+	// Default (continuation): find ONE root cell the curve certainly
+	// passes through (extract_cell()'s own any_edge, tested directly --
+	// not a proxy like gradient dispersion), then explore outward
+	// through ONLY the cells actually touched by the curve: bisect a
+	// touched cell down to max_depth via compat_bisect() (recursing into
+	// every cell that cascade creates, since a graded-mesh cascade can
+	// touch cells elsewhere too -- each independently re-tested by
+	// any_edge, so an irrelevant collateral cell is dropped immediately);
+	// once at max_depth, propagate to glpt_tree::neighbor_leaf() across
+	// all 5 facets. Never looks at the other 107 roots at all unless
+	// reached this way. For a CONNECTED curve this was measured
+	// (2026-09-25) to recover the EXACT SAME final leaf set as testing
+	// every one of the 108 roots directly, while building a mesh 2.5-6x
+	// smaller than this file's own gradient-dispersion Phase 1 at the
+	// same depth/--threshold, and never a WORSE bad-cell rate (only ever
+	// better, on curves where the old criterion stopped refining a
+	// touched cell too early) -- see [[riemann_glpt_continuation]].
+	// face_crossing_cache is shared with Phase 2 below on purpose: every
+	// 2-face this phase already solved via any_edge testing is reused
+	// there, not recomputed.
+	//
+	// --legacy-priority-refine: the ORIGINAL global gradient-dispersion
+	// priority queue (cell_priority/cell_priority_bernstein, modulated
+	// by --proximity), kept only for comparison -- see this file's own
+	// git history and [[riemann_pc2_gradient_dispersion]].
 	cout<<endl<<"--- adaptive refinement ---"<<endl;
-	priority_queue<pair<double,glpt> > pq;
-	int ndropped=0;
-	for(int s=0;s<GLPT_NCELLS;++s) {
-		pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
-		glpt c(s);
-		cell_points_and_ids(c, gp, id_cache, pts, ids);
-		double p = g_bernstein ? cell_priority_bernstein(pts,ids,bcache) : cell_priority(pts);
-		if(g_bernstein && p<0) { ++ndropped; continue; } // certified empty
-		pq.push(make_pair(p, c));
-	}
+	face_crossing_cache fcache;
 	int nsubdivisions=0;
-	while(!pq.empty()) {
-		pair<double,glpt> top = pq.top(); pq.pop();
-		glpt cv = top.second;
-		if(!tree.exists(cv)) continue;
-		if(top.first<threshold) break;
-		if(cv.simplex_level()>=max_depth) continue;
-		tree.clear_recent();
-		tree.compat_bisect(cv);
-		++nsubdivisions;
-		const vector<glpt>& recent = tree.recent_leaves();
-		for(size_t i=0;i<recent.size();++i) {
-			if(!tree.exists(recent[i])) continue; // superseded later in this same cascade -- see recent_leaves()'s own comment
+	if(legacy_priority_refine) {
+		priority_queue<pair<double,glpt> > pq;
+		int ndropped=0;
+		for(int s=0;s<GLPT_NCELLS;++s) {
 			pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
-			cell_points_and_ids(recent[i], gp, id_cache, pts, ids);
+			glpt c(s);
+			cell_points_and_ids(c, gp, id_cache, pts, ids);
 			double p = g_bernstein ? cell_priority_bernstein(pts,ids,bcache) : cell_priority(pts);
-			if(g_bernstein && p<0) { ++ndropped; continue; }
-			pq.push(make_pair(p, recent[i]));
+			if(g_bernstein && p<0) { ++ndropped; continue; } // certified empty
+			pq.push(make_pair(p, c));
 		}
+		while(!pq.empty()) {
+			pair<double,glpt> top = pq.top(); pq.pop();
+			glpt cv = top.second;
+			if(!tree.exists(cv)) continue;
+			if(top.first<threshold) break;
+			if(cv.simplex_level()>=max_depth) continue;
+			tree.clear_recent();
+			tree.compat_bisect(cv);
+			++nsubdivisions;
+			const vector<glpt>& recent = tree.recent_leaves();
+			for(size_t i=0;i<recent.size();++i) {
+				if(!tree.exists(recent[i])) continue; // superseded later in this same cascade -- see recent_leaves()'s own comment
+				pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
+				cell_points_and_ids(recent[i], gp, id_cache, pts, ids);
+				double p = g_bernstein ? cell_priority_bernstein(pts,ids,bcache) : cell_priority(pts);
+				if(g_bernstein && p<0) { ++ndropped; continue; }
+				pq.push(make_pair(p, recent[i]));
+			}
+		}
+		cout<<"subdivisions performed: "<<nsubdivisions<<endl;
+		if(g_bernstein) cout<<"cells certified empty (dropped, never refined): "<<ndropped<<endl;
+	} else {
+		int seed_root=-1;
+		long n_cells_tested=0;
+		for(int s=0;s<GLPT_NCELLS;++s) {
+			pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
+			cell_points_and_ids(glpt(s), gp, id_cache, pts, ids);
+			cell_extraction_result res;
+			extract_cell(pts, ids, fcache, res);
+			++n_cells_tested;
+			if(res.any_edge) { seed_root=s; break; }
+		}
+		if(seed_root<0) {
+			cout<<"curve doesn't touch any of the 108 root cells -- nothing to mesh"<<endl;
+		} else {
+			cout<<"seed root: "<<seed_root<<" (scanned "<<(seed_root+1)<<"/108)"<<endl;
+			set<glpt> visited;
+			vector<glpt> frontier(1, glpt(seed_root));
+			while(!frontier.empty()) {
+				glpt c = frontier.back(); frontier.pop_back();
+				if(!tree.exists(c)) continue;      // superseded by an earlier cascade
+				if(visited.count(c)) continue;
+				visited.insert(c);
+				pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
+				cell_points_and_ids(c, gp, id_cache, pts, ids);
+				cell_extraction_result res;
+				extract_cell(pts, ids, fcache, res);
+				++n_cells_tested;
+				if(!res.any_edge) continue;        // curve doesn't reach here -- stop
+				if(c.simplex_level()<max_depth) {
+					tree.clear_recent();
+					tree.compat_bisect(c);
+					++nsubdivisions;
+					const vector<glpt>& recent = tree.recent_leaves();
+					for(size_t i=0;i<recent.size();++i) frontier.push_back(recent[i]);
+				} else {
+					for(int i=0;i<=glpt::DIM;++i) {
+						glpt nb;
+						glpt_tree::neighbor_status ns = tree.neighbor_leaf(c, i, nb);
+						if(ns==glpt_tree::FOUND && !visited.count(nb)) frontier.push_back(nb);
+					}
+				}
+			}
+		}
+		cout<<"subdivisions performed: "<<nsubdivisions<<", cells tested: "<<n_cells_tested<<endl;
 	}
-	cout<<"subdivisions performed: "<<nsubdivisions<<endl;
-	if(g_bernstein) cout<<"cells certified empty (dropped, never refined): "<<ndropped<<endl;
 	cout<<"final leaf count: "<<tree.leaf_count()<<endl;
 	cout<<"distinct vertices minted: "<<id_cache.next_id()<<" ("<<GLPT_BASE_VERTEX_COUNT<<" base + "
 		<<(id_cache.next_id()-GLPT_BASE_VERTEX_COUNT)<<" from bisection)"<<endl;
@@ -483,7 +570,6 @@ int main(int argc, char* argv[]) {
 	//   own OBJ output does (verified there directly: every output edge
 	//   at multiplicity 1, no global dedup at all).
 	cout<<endl<<"--- surface extraction ---"<<endl;
-	face_crossing_cache fcache;
 	int npoly_out[8]={0,0,0,0,0,0,0,0};
 	int ntouching_tets=0, nbad_tets=0, ok_cells=0, bad_cells=0, nclipped=0;
 	long n_cells_visited=0;
