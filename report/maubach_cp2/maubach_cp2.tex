@@ -1,0 +1,1165 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage{hyperref}
+\usepackage{cleveref}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+\newtheorem*{defthm}{Definition}
+\newtheorem*{lemthm}{Lemma}
+\newtheorem*{thmthm}{Theorem}
+\newtheorem*{propthm}{Proposition}
+\newtheorem*{remthm}{Remark}
+
+\newcommand{\CP}{\mathbb{CP}}
+\newcommand{\type}{\mathrm{type}}
+\newcommand{\level}{\mathrm{level}}
+\newcommand{\msplit}{\mathrm{split}}
+\newcommand{\link}{\mathrm{link}}
+\newcommand{\weld}{\mathrm{weld}}
+\newcommand{\st}{\mathrm{st}}
+
+\lstdefinestyle{cpp}{
+  language=C++,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!60!black}\bfseries,
+  commentstyle=\color{green!40!black}\itshape,
+  stringstyle=\color{orange!70!black},
+  showstringspaces=false,
+  breaklines=true,
+  columns=flexible,
+  tabsize=2,
+  frame=single,
+  framerule=0.3pt,
+  numbers=none,
+}
+
+\title{\bf Maubach Subdivision on $\CP^2$}
+\author{Vinicius Mello}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Maubach's edge-based star-subdivision scheme, as developed in Chapter 4 of
+the author's thesis, is a purely combinatorial criterion (the ``Maubach
+invariants'') that guarantees a longest-edge-style bisection algorithm
+propagates correctly across an entire mesh. The thesis proves this
+criterion is satisfied by two specific constructions: the canonical
+(Coxeter--Freudenthal--Kuhn) triangulation of a product of simplices, and
+the barycentric subdivision of an arbitrary mesh. Both routes rely on a
+\emph{global} vertex ranking that is not available in general. This report
+verifies the thesis's Lemmas 5--7 (finding and correcting a symbol lost in
+the source PDF's text layer along the way), and then shows, with a working
+implementation, that the same criterion extends well beyond those two
+cases: to meshes in dimension greater than the classical $\le 3$ setting,
+and to a triangulation with no group-orbit or flag structure at all,
+verified compatible purely by an offline combinatorial search. The
+application used throughout is the adaptive triangulation of a smooth
+algebraic curve $F(X,Y,Z)=0$ -- a Riemann surface -- realized as a
+codimension-2 locus inside the complex projective plane $\CP^2$ (a real
+4-manifold), triangulated by Gaifullin's 108-cell complex. We describe how
+this mesh satisfies Maubach compatibility, how an economical, pointerless
+cell representation (Atalay \& Mount's LPT codes) is adapted to a seed with
+no algebraic symmetry, and the final version of the resulting adaptive
+triangulation algorithm, based on continuation rather than global
+refinement.
+\end{abstract}
+
+\tableofcontents
+
+% =====================================================================
+\section{Introduction}
+% =====================================================================
+
+Star-subdivision schemes (Chapter 4 of the thesis~\cite{mello2006})
+formalize a simple idea:
+a mesh can be refined automatically, guided only by its own combinatorial
+data (the partial order on vertices, adjacency, and a hierarchy level),
+without ever consulting geometry. Two such schemes are developed there in
+parallel -- Mitchell's, based on splitting a distinguished \emph{facet},
+and Maubach's, based on splitting a distinguished \emph{edge} (the
+classical ``longest-edge'' bisection of Kuhn's canonical triangulation of a
+cube). Both are given as an \emph{invariant} $\mathcal I$ (a combinatorial
+property a conforming mesh may or may not have) together with a
+subdivision algorithm that is proved to preserve $\mathcal I$ forever, once
+it holds.
+
+The thesis proves Maubach's invariant is satisfied by exactly two
+constructions: the canonical triangulation of a product of $n$ simplices
+(Theorem 9 -- of which Kuhn's triangulation of a cube, a product of $n$
+intervals, is the special case actually used throughout the rest of the
+thesis) and the barycentric subdivision of an arbitrary mesh (Theorem 10).
+Both proofs go through the same mechanism: a \emph{global} function that
+assigns every vertex of the whole complex a rank in $\{0,\dots,m\}$, such
+that every top-dimensional cell sees each rank exactly once. Neither
+construction says anything about whether an \emph{arbitrary} triangulation
+-- one with no such global ranking built in -- can be made Maubach-compatible.
+
+This report's goal is to show that it can, and that the resulting
+machinery genuinely generalizes past the setting the thesis develops it
+in: dimension $\le 3$, and meshes derived from Kuhn's cube. We do this
+constructively, through a concrete application developed over several
+work sessions: the adaptive triangulation of a smooth plane algebraic
+curve (a Riemann surface) $F(X,Y,Z)=0$, realized not as a pair of
+identified Riemann spheres but directly as a codimension-2 real
+submanifold of $\CP^2$ -- a genuinely 4-dimensional real ambient space,
+triangulated by A.~Gaifullin's 15-vertex, 108-cell minimal-vertex
+triangulation of $\CP^2$~\cite{gaifullin}, a mesh with no product structure
+and no flag/rank structure inherited by construction.
+
+The report is organized as follows. \Cref{sec:maubach} recapitulates the
+relevant part of Chapter 4 -- star subdivisions, the Maubach invariants,
+and Lemmas 5--7 -- verifying each proof directly (\Cref{sec:maubach}
+includes one genuine correction: the PDF's text layer silently drops the
+comparison symbols in Lemma 5's statement; \Cref{sec:lemma5} reconstructs
+and confirms the correct direction both from the proof and from the
+original page image). \Cref{sec:gaifullin} shows how Gaifullin's
+triangulation is made Maubach-compatible: not via a global rank, but by
+reformulating Definition 9 as a graph-coloring search on the mesh's dual
+graph, solved once, offline, by exact backtracking, and cross-checked
+against GAP's \texttt{simpcomp} package. \Cref{sec:lpt} describes the
+economical, pointerless cell representation this project built on top of
+that mesh -- an extension of Atalay \& Mount's LPT
+codes~\cite{atalaymount} -- with particular attention to what changes in
+the neighbor-finding rules once the seed cells are no longer a single
+group orbit. \Cref{sec:continuation} describes, in full detail, the
+current (and, as of this writing, final) version of the Riemann-surface
+triangulation algorithm, which abandons global refinement in favor of
+continuation: following the curve outward from a single confirmed contact
+cell, using exactly the neighbor machinery of \Cref{sec:lpt}.
+
+% =====================================================================
+\section{Star subdivisions and the Maubach invariant}
+\label{sec:maubach}
+% =====================================================================
+
+We use the thesis's own notation throughout, restated here only as needed.
+A \emph{star subdivision} of a complex $K$ at a simplex $\sigma$, replacing
+$\sigma$'s star by a cone from a new vertex $v$ over $\link(\sigma,K)$
+joined with $\partial\sigma$, is written $K'=K(\sigma,v)$. An
+\emph{ordered} star subdivision $K'=K(\sigma,v)_l$ additionally records
+that $v$ occupies position $l$ in every cell of $\st(v,K')$. If $\sigma$ is
+itself an $m$-dimensional cell $\langle v_0,\dots,v_m\rangle$ and
+$\delta=[j_0,\dots,j_n]\sigma$ is one of its faces, then $K(\delta,v)_l$
+produces $n+1$ \emph{child cells} $c_0\sigma,\dots,c_n\sigma$, one per
+facet of $\partial\delta$, related by
+\[
+  \partial_l\, c_i\sigma \;=\; \partial_{j_{n-i}}\,\sigma .
+\]
+A finite sequence of ordered star subdivisions
+$\tau=(\delta_1,v_1)_{l_1}\cdots(\delta_q,v_q)_{l_q}$ imposes a parent/child
+hierarchy on cells, tracked by a function $\level(\cdot)$ with
+$\level(\sigma)=0$ for $\sigma\in K$ and $\level(c_i\sigma)=\level(\sigma)+1$.
+
+A \emph{subdivision scheme} consists of an invariant $\mathcal I$
+(referring only to combinatorial data: the vertex order, adjacency,
+$\level$) and an algorithm $\mathrm{Subdivide}(K,\sigma)$ that, to subdivide
+a single cell $\sigma$, first propagates a cascade of subdivisions
+elsewhere in the mesh as needed to keep $\mathcal I$ true throughout,
+before finally splitting $\sigma$ itself. The property used constantly
+below is
+\begin{equation}
+  \partial_i\sigma=\partial_j\omega \;\Longrightarrow\; |\level(\sigma)-\level(\omega)|\le 1 .
+  \tag{OneLevel}
+\end{equation}
+
+\subsection{The Maubach invariants}
+
+Maubach's scheme~\cite{maubach} splits the edge $[0,\type(\sigma)]$ of a
+cell, where
+\[
+  \type(\sigma) \;:=\; m - \big(\level(\sigma)\bmod m\big) \;\in\;\{1,\dots,m\}.
+\]
+
+\begin{defthm}[Definition 9]
+An $m$-dimensional mesh $K$ satisfies the \emph{Maubach invariants} if,
+besides (OneLevel), for any two adjacent cells $\sigma,\omega$ with
+$\partial_i\sigma=\partial_j\omega$,
+\begin{align}
+  \level(\sigma)=\level(\omega) \;&\Longrightarrow\;
+    i=j \quad\text{or}\quad \{i,j\}=\{0,\type(\omega)\}, \tag{MaubachA}\\
+  \level(\sigma)=\level(\omega)+1 \;&\Longrightarrow\;
+    i=\type(\omega) \ \text{and}\ j\in\{0,\type(\omega)\}. \tag{MaubachB}
+\end{align}
+\end{defthm}
+
+Writing $\msplit(\sigma):=\sigma[0,\type(\sigma)]$, (MaubachA) says that two
+same-level adjacent cells either agree exactly on which vertex their
+shared facet omits, or disagree in exactly the pair $\{0,\type(\omega)\}$ --
+which, as the thesis shows immediately after the definition, still forces
+$\msplit(\sigma)=\msplit(\omega)$. (MaubachB) says that if $\omega$ is one
+level shallower than $\sigma$, subdividing $\msplit(\omega)$ will hand one
+of $\omega$'s children exactly the facet $\sigma$ already has.
+
+\subsection{Lemma 5: propagation direction, verified}
+\label{sec:lemma5}
+
+\begin{lemthm}[Lemma 5]
+Let $K$ be a mesh satisfying the Maubach invariants and $\sigma,\omega\in K$
+two adjacent cells with $\partial_i\sigma=\partial_j\omega$. Then
+\[
+\begin{cases}
+\level(\omega)\le\level(\sigma), & \text{if } i\notin\{0,\type(\sigma)\}\\
+\level(\omega)\ge\level(\sigma), & \text{if } i\in\{0,\type(\sigma)\}.
+\end{cases}
+\]
+Moreover, if $\level(\omega)<\level(\sigma)$, then $i=\type(\omega)$.
+\end{lemthm}
+
+\begin{proof}
+If $\level(\omega)>\level(\sigma)$, then by (OneLevel)
+$\level(\omega)=\level(\sigma)+1$. Applying (MaubachB) with the roles of
+the two cells matched so that $\omega$ is the deeper one (i.e.\ with
+$\sigma$ playing (MaubachB)'s ``$\omega$''), we get $i\in\{0,\type(\sigma)\}$,
+proving the first case (by contraposition: $i\notin\{0,\type(\sigma)\}$
+rules out $\level(\omega)>\level(\sigma)$, leaving $\level(\omega)\le\level(\sigma)$
+by (OneLevel)). If $\level(\omega)<\level(\sigma)$, then by (OneLevel)
+$\level(\sigma)=\level(\omega)+1$, and (MaubachB) applies directly, giving
+$i=\type(\omega)$ -- which is the ``moreover'' clause -- and consequently
+$i\notin\{0,\type(\sigma)\}$ (since $\type(\cdot)\in\{1,\dots,m\}$ never
+takes the value $0$, and $\type(\omega)\ne\type(\sigma)$ because
+$\level(\omega)=\level(\sigma)-1$ shifts $\level\bmod m$ by exactly one).
+This proves the second case, again by contraposition.
+\end{proof}
+
+\begin{remthm}
+The PDF text extracted from the thesis's source loses the two comparison
+glyphs in the lemma's statement entirely (a font-encoding artifact of the
+document, not a content error) -- both lines print as bare
+\texttt{level($\omega$)\ \ level($\sigma$)} with the relation missing. We
+reconstructed the correct direction independently from the two proof
+paragraphs above (the first paragraph derives
+$\level(\omega)>\level(\sigma)\Rightarrow i\in\{0,\type(\sigma)\}$, whose
+contrapositive gives the \emph{first} printed case; the second derives
+$\level(\omega)<\level(\sigma)\Rightarrow i\notin\{0,\type(\sigma)\}$,
+giving the \emph{second}), then confirmed it against the original page
+image (page 48 of the PDF), which does show $\le$ then $\ge$ exactly as
+above. Worth flagging explicitly: this direction is the \emph{opposite} of
+the special/generic pairing in Mitchell's analogous Lemma 1 ($i=0\Rightarrow
+\level(\omega)\le\level(\sigma)$, $i\ne0\Rightarrow\level(\omega)\ge
+\level(\sigma)$ there) -- not a typo, but a real consequence of
+(MaubachB)'s built-in asymmetry: unlike Mitchell's fixed special index $0$,
+Maubach's special pair always references $\type$ of the \emph{shallower}
+cell, regardless of which of $\sigma,\omega$ that is.
+\end{remthm}
+
+\subsection{Lemma 6: the child relation}
+
+\begin{lemthm}[Lemma 6]
+Let $K$ be a mesh consisting of a single $m$-dimensional cell $\omega$, and
+$K'=K(\omega[0,l],v)_l$ with $l>0$. Then the cells $c_0\omega,c_1\omega\in
+K'$ satisfy $\partial_0 c_0\omega=\partial_{l-1}c_1\omega$.
+\end{lemthm}
+
+\begin{proof}
+Write $\omega=\langle v_0,v_1,\dots,v_m\rangle$. Applying $(\omega[0,l],v)_l$
+gives
+\[
+  c_0\omega=\langle v_0,\dots,v_{l-1},v,v_{l+1},\dots,v_m\rangle,\qquad
+  c_1\omega=\langle v_1,\dots,v_l,v,v_{l+1},\dots,v_m\rangle,
+\]
+and dropping position $0$ from $c_0\omega$ or position $l-1$ from
+$c_1\omega$ both yield $\langle v_1,\dots,v_{l-1},v,v_{l+1},\dots,v_m\rangle$.
+\end{proof}
+
+This is the geometric content of ``splitting the edge $[0,l]$'': the two
+children share the facet obtained by dropping the \emph{old} endpoint on
+each side, at the position where the \emph{new} vertex $v$ was inserted on
+the other side -- exactly the bookkeeping the LPT sibling-facet rule of
+\Cref{sec:lpt} will later reuse verbatim, with zero floating-point work.
+
+\subsection{Lemma 7: propagation preserves the invariants}
+
+\begin{lemthm}[Lemma 7]
+Let $K$ be a mesh consisting of two adjacent $m$-dimensional cells
+$\sigma,\omega$ with $\partial_i\sigma=\partial_j\omega$, such that
+$0\le\level(\sigma)-\level(\omega)\le 1$. Then, if $K$ satisfies the
+Maubach invariants, so does $K'=K(\omega[0,l],v)_l$ with $l=\type(\omega)$.
+\end{lemthm}
+
+\begin{proof}
+There are seven possible cases, distinguished by whether $\sigma,\omega$
+are at the same level or one apart, and by which of $\{i,j\}$ equal $0$ or
+$l$. In every case, $\omega$'s subdivision produces $c_0\omega,c_1\omega$
+with $\partial_0c_0\omega=\partial_{l-1}c_1\omega$ (Lemma 6), which already
+satisfies (MaubachA) on its own; the seven cases only differ in \emph{which}
+additional relation involving $\sigma$ must be checked, and each resolves
+to a single facet identity that satisfies either (MaubachA) or (MaubachB)
+directly:
+\begin{enumerate}[itemsep=1pt,topsep=2pt]
+  \item $\level(\sigma)=\level(\omega)$, $i=j=0$: $\partial_0\sigma=\partial_l c_1\omega$, satisfying (MaubachB).
+  \item $\level(\sigma)=\level(\omega)$, $i=j=l$: $\partial_l\sigma=\partial_l c_0\omega$, satisfying (MaubachB).
+  \item $\level(\sigma)=\level(\omega)$, $i=j=k\notin\{0,l\}$: $\sigma$ is
+    also subdivided (into $c_0\sigma,c_1\sigma$, with the same Lemma-6
+    relation), and $\partial_k c_0\sigma=\partial_k c_0\omega$,
+    $\partial_{k-1}c_1\sigma=\partial_{k-1}c_1\omega$, both satisfying (MaubachA).
+  \item $\level(\sigma)=\level(\omega)$, $i=0$, $j=l$: $\partial_0\sigma=\partial_l c_0\omega$, satisfying (MaubachB).
+  \item $\level(\sigma)=\level(\omega)$, $i=l$, $j=0$: $\partial_l\sigma=\partial_l c_1\omega$, satisfying (MaubachB).
+  \item $\level(\sigma)=\level(\omega)+1$, $i=l$, $j=0$: $\partial_l\sigma=\partial_l c_1\omega$, satisfying (MaubachA).
+  \item $\level(\sigma)=\level(\omega)+1$, $i=l$, $j=l$: $\partial_l\sigma=\partial_l c_0\omega$, satisfying (MaubachA).
+\end{enumerate}
+In every case $K'$ satisfies the Maubach invariants.
+\end{proof}
+
+\begin{remthm}
+Each of the seven cases was checked directly against Lemma 6's own two
+identities and Definition 9's two clauses; none requires anything beyond
+substituting the child cell's known facet identity into whichever of
+(MaubachA)/(MaubachB) the resulting $\level$/index pair falls under. Cases
+1--5 (same level) all end up invoking (MaubachB) precisely because
+$\sigma$, unmoved, is now one level \emph{shallower} than $\omega$'s new
+children; cases 6--7 invoke (MaubachA) because $\sigma$ was already one
+level deeper than $\omega$ and stays so relative to $\omega$'s children.
+This is a satisfying cross-check: it is exactly the pattern Lemma 5
+predicts for which relation must hold once the levels involved are known.
+\end{remthm}
+
+\begin{thmthm}[Theorem 8]
+Let $K$ be an $m$-dimensional mesh satisfying the Maubach invariants and
+$\sigma\in K$. Then the mesh $K'$ resulting from Maubach's subdivision
+algorithm applied to $(K,\sigma)$ also satisfies the Maubach invariants,
+and the algorithm is consistent, alternating, and balanced.
+\end{thmthm}
+
+The proof is by induction on $\level(\sigma)$, exactly mirroring the
+Mitchell case: at the minimal level, Lemma 5 shows every cell sharing
+$\sigma$'s subdivision edge $\epsilon=\sigma[0,\type(\sigma)]$ is also at
+that level, so the algorithm's own recursive step is never triggered; Lemma
+7, applied to every pair of adjacent cells in $\st(\epsilon,K)$, then shows
+the resulting mesh still satisfies the invariants. At any higher level,
+Lemma 5 and the induction hypothesis reduce to the same base case one level
+down. The one detail specific to Maubach (absent from Mitchell's proof) is
+that $K$ must already be conforming, since the algorithm implicitly walks
+the star of the subdivision edge.
+
+\subsection{Two constructive routes, and their common mechanism}
+\label{sec:tworoutes}
+
+The thesis exhibits two families of meshes satisfying Definition 9
+outright.
+
+\begin{thmthm}[Theorem 9]
+Let $\mathrm{Tr}(\Sigma)$ be the canonical triangulation of a product of
+$n$ simplices $\Sigma=\Delta^{m_1}\times\cdots\times\Delta^{m_n}$. Then for
+any $\sigma,\omega\in\mathrm{Tr}(\Sigma)$, $\partial_i\sigma=\partial_j\omega
+\Rightarrow i=j$; in particular $\mathrm{Tr}(\Sigma)$ satisfies the Maubach
+invariants.
+\end{thmthm}
+
+\begin{thmthm}[Theorem 10]
+Let $K$ be any $n$-dimensional mesh. Then for any $\sigma,\omega\in B(K)$
+(its barycentric subdivision), $\partial_i\sigma=\partial_j\omega
+\Rightarrow i=j$; in particular $B(K)$ satisfies the Maubach invariants.
+\end{thmthm}
+
+Both proofs share one mechanism, worth isolating explicitly because it is
+exactly what fails for the mesh this report actually uses. In Theorem 9,
+every cell's $j$-th vertex is $v_L$ with $|L|=j$, where $|L|$ is the
+\emph{lattice rank} of the multi-index $L\in\{0,\dots,m_1\}\times\cdots
+\times\{0,\dots,m_n\}$ -- a quantity defined once, globally, on the whole
+vertex set, independent of which cell we look at. In Theorem 10, the
+analogous role is played by $d(\delta)$, the dimension of the flag element
+$\delta$ labelling a barycentric-subdivision vertex. In both cases, a
+shared facet's missing local index is forced to equal the (unique) rank
+value absent from that facet's vertex ranks -- so it is automatically the
+\emph{same} value on both sides. Call this a \emph{global flag/rank}
+structure: a function $\mathrm{rank}:V\to\{0,\dots,m\}$ on the vertex set of
+the entire complex such that every top cell's vertices realize every rank
+exactly once, with each cell's local vertex order taken to be its rank.
+Whenever such a function exists, Maubach compatibility (indeed the
+strictly stronger $i=j$ always) follows for free.
+
+Kuhn's own triangulation of a cube is the $n=m$, $m_1=\cdots=m_n=1$ case of
+Theorem 9, and it is this special case -- not the general product
+construction -- that the rest of the thesis, and the LPT machinery of
+\Cref{sec:lpt}, was originally built around. Neither theorem, however, says
+anything about a mesh that is \emph{neither} a product of simplices
+\emph{nor} a barycentric subdivision -- which is exactly the situation for
+the triangulation used in this report. (A related, more elementary
+question -- whether the SAME monotone-path mechanism still works when each
+\emph{factor} of the product is itself an already-compatible mesh with
+more than one cell, rather than a bare simplex -- is answered in
+\Cref{app:product}.) Since the thesis was published only in Portuguese,
+\Cref{app:proofs} also gives literal English translations of Theorems 8,
+9 and 10's own proofs, together with Maubach's subdivision algorithm
+itself.
+
+% =====================================================================
+\section{Compatibility beyond the cube: a combinatorial search}
+\label{sec:gaifullin}
+% =====================================================================
+
+\subsection{Definition 9 as a coloring problem}
+
+The global flag/rank mechanism of \Cref{sec:tworoutes} is a
+\emph{sufficient}, not necessary, route to Maubach compatibility --
+Definition 9 itself only constrains \emph{pairs of adjacent cells}, and
+says nothing about vertices globally. This suggests a direct, local
+reformulation. Restricted to the cells of an initial \emph{seed} mesh
+(before any subdivision, so $\level\equiv 0$ and hence $\type(\sigma)=m$
+for every cell), (MaubachA) reads
+\[
+  \partial_i\sigma=\partial_j\omega \;\Longrightarrow\; i=j \ \text{or}\ \{i,j\}=\{0,m\}.
+\]
+This is a per-cell \emph{local vertex ordering} problem: choose, for each
+$m$-cell, a bijection between its $m+1$ vertices and local positions
+$\{0,\dots,m\}$ (equivalently, a coloring of the facet \emph{opposite} each
+vertex by that vertex's position) such that whenever two cells share a
+facet, the two colors assigned to it agree, up to the single allowed
+exception of the pair $\{0,m\}$. Phrased on the mesh's \emph{dual graph}
+(one node per cell, one edge per shared facet), this is a graph-coloring
+search: find a proper edge-coloring of the dual graph by $m+1$ colors that
+also respects, cell by cell, which color each cell may legally place on
+which of its own facets. Unlike \Cref{sec:tworoutes}'s constructions, this
+question is decidable for \emph{any fixed} triangulation, independent of
+whether it carries any algebraic symmetry, simply by search.
+
+\subsection{Gaifullin's triangulation}
+
+The mesh used throughout the rest of this report is A.~Gaifullin's
+15-vertex triangulation of $\CP^2$~\cite{gaifullin} (Construction 1.1 and
+\S3 of that paper), independently cross-checked against GAP's
+\texttt{simpcomp} library (SCLib entry \#397, ``Gaifullin CP\textasciicircum2'',
+identical f-vector and facet list up to relabeling). Its 15 vertices are
+labelled by $(V_4\setminus\{e\})\,\dot\cup\,(\{1,2,3,4\}\times\{1,2,3\})$,
+where $V_4$ is the Klein four-group inside $S_4$; its 108 four-simplices
+have $f$-vector $(f_0,\dots,f_4)=(15,90,240,270,108)$, matching $\CP^2$'s
+own Euler characteristic $3$ ($f_0-f_1+f_2-f_3+f_4=15-90+240-270+108=3$).
+
+Two independent combinatorial facts about this triangulation were verified
+by exact backtracking search (this project's own offline computation, not
+part of Gaifullin's paper) and cross-checked against \texttt{simpcomp}:
+
+\begin{itemize}
+\item \textbf{Maubach compatibility.} The 108-node, 5-regular dual graph
+  (one edge per shared tetrahedral facet -- $108\times5/2=270$ edges,
+  matching $f_3=270$ exactly) admits a proper 5-edge-coloring: a facet-owner
+  histogram of $\{2:270\}$ confirms every facet is shared by exactly two
+  cells (a genuine closed pseudomanifold), and $0$ same-index mismatches
+  confirms the coloring realized above satisfies $\partial_i\sigma=
+  \partial_j\omega\Rightarrow i=j$ for every one of the 270 shared facets
+  -- the \emph{strong} form, with no need of the $\{0,m\}$ exception at
+  all.
+\item \textbf{Global orientation coherence.} The same dual graph is
+  bipartite (verified by breadth-first 2-coloring, $0$ conflicts), which is
+  exactly the condition needed for a globally coherent choice of cell
+  orientations under the standard $(-1)^{\text{local index}}$
+  boundary-operator sign convention: adjacent cells must always induce
+  \emph{opposite} orientations on their shared facet, and a BFS sign
+  propagation over a non-bipartite dual graph would hit a contradiction on
+  some odd cycle.
+\end{itemize}
+
+Both properties are logically independent -- a triangulation can satisfy
+either without the other -- and both reduce to search on the same
+structure (the dual graph), rather than to any inherited algebraic
+symmetry. The 108 cells' local vertex orders, as actually used everywhere
+in the implementation, are precisely the ones this search assigned: local
+position $i$ of a vertex in a cell is the color the 5-edge-coloring gave to
+the facet opposite it.
+
+\subsection{A cautionary counterexample: Kühnel's triangulation}
+
+An earlier stage of this project attempted the same route with W.~Kühnel
+and T.~Banchoff's classical 9-vertex, 36-cell minimal triangulation of
+$\CP^2$ instead (reproduced in R.~Schwartz's
+\cite{schwartz}). An exact backtracking search there \emph{does} find a
+valid 5-edge-coloring of its own 36-node dual graph realizing $i=j$ always
+-- so Kühnel's raw complex is Maubach-compatible in exactly the same
+strong sense as Gaifullin's. Its dual graph, however, is \emph{not}
+bipartite, so global orientation coherence fails outright: no per-cell
+sign choice makes every adjacent pair induce opposite orientations. The
+workaround adopted at the time -- barycentric subdivision, which by
+Theorem 10 is \emph{guaranteed} to be both Maubach-compatible and
+orientable, since its global flag/rank structure fixes both properties at
+once -- introduced its own, unrelated numerical defect: three of Kühnel's
+nine original points are exact affine combinations of two others, so three
+of the barycentric subdivision's new flag-centroid vertices collapse
+exactly onto already-existing vertices, producing degenerate,
+zero-length-edge cells that Maubach's own longest-edge rule can never
+split. Gaifullin's triangulation was adopted instead precisely because it
+satisfies \emph{both} combinatorial properties directly, with no
+subdivision step and hence no vertex-coincidence risk at all.
+
+% =====================================================================
+\section{An economical mesh representation: LPT codes and neighbor finding}
+\label{sec:lpt}
+% =====================================================================
+
+\subsection{Atalay \& Mount's pointerless codes}
+
+A naive implementation of Maubach subdivision keeps every cell ever
+created -- bisected or not -- in an append-only container, since other
+cells' incidence data may reference it; memory then grows monotonically
+with refinement depth. This project's first $\CP^2$ implementation, built
+on the library's general-purpose \texttt{nmt<4>} semi-simplicial container,
+measured this directly: roughly 4--5\,GB peak resident memory around
+subdivision depth 18 on a machine with 7.2\,GB of RAM.
+
+Atalay \& Mount's \emph{LPT code}~\cite{atalaymount} avoids this entirely,
+for the specific case of Kuhn's canonical triangulation of a hypercube: a
+cell is identified by a small, self-contained integer -- no pointers, no
+stored incidence -- from which both the cell's own geometry (their Theorem
+1) and its same-\emph{orthant} neighbors' codes (their Theorem 2) are
+computable in $O(1)$-ish time by table lookup alone. The key structural
+fact their scheme exploits is that Kuhn's $m!$ root simplices are not $m!$
+independent objects, but a single orbit of $\mathrm{Sym}(m)$ acting on one
+reference simplex; composing a root's signed permutation with the
+elementary swap that crosses a same-orthant facet always lands on
+\emph{another member of that same orbit}, by group closure -- so a
+same-orthant neighbor never needs to consult anything beyond the
+permutation-table itself.
+
+\subsection{\texttt{glpt}: extending LPT to a non-orbit seed}
+
+This project's \texttt{glpt} code (\texttt{\textasciitilde/code/lpt/glpt.hpp})
+reuses Atalay \& Mount's $(\level,\mathrm{sigperm},\mathrm{orthant\_level})$
+machinery verbatim -- it is dimension-generic and independent of which
+seed cell a code descends from -- and adds one field, \texttt{seed\_index}
+$\in\{0,\dots,107\}$, selecting which of Gaifullin's 108 root cells a given
+code belongs to. The resulting cell identity is a handful of bit-packed
+fields fitting in a single machine word:
+
+\begin{center}
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+field & \texttt{seed} & \texttt{level} & \texttt{sigperm} & \texttt{orthant\_level} & \texttt{orth} \\
+\midrule
+width (bits) & 7 & 2 & 9 & 4 & 10 \\
+range & $0..107$ & $0..3$ & $0..383$ & -- & -- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+-- 32 bits in total, no pointers, no per-cell incidence data stored
+anywhere. Storage cost is $O(1)$ per \emph{current leaf}, not per cell ever
+created (\Cref{sec:tree} below).
+
+Gaifullin's 108 cells are \textbf{not} a group orbit -- they are 108
+independently-specified vertex-order lists, related to each other only by
+which facets happen to coincide, a fact established by the search of
+\Cref{sec:gaifullin}, not by any algebraic symmetry. So the orbit-closure
+property Atalay \& Mount's same-orthant formula relies on simply does not
+hold here: empirically, a same-orthant ($1\le i\le\dim$) facet crossing
+changes \texttt{seed\_index} in roughly a quarter of sampled cases at
+realistic depths, confirmed both statistically and by hand for a concrete
+case (a facet whose barycentric weight, relative to the seed's own five
+vertices, is exactly zero once the excluded vertex is dropped -- a genuine
+boundary touch). A first attempt at reusing the paper's formula unchanged
+was cross-checked against the invariant that every cell's vertices must be
+convex combinations of its seed's own five original points (since the
+whole tree is built by repeated midpointing): it produced a barycentric
+weight outside $[0,1]$ -- a geometric impossibility -- in 23.0\% of sampled
+same-orthant cases, lining up exactly with the $\sim$24\% of cases that
+legitimately do cross a seed boundary.
+
+\subsection{The neighbor function}
+
+\texttt{glpt::neighbor(i,\,\&result)} resolves a query facet $i$ of a cell
+by one of four different rules, chosen by an exact combinatorial gate --
+this is the one piece of the whole implementation genuinely reshaped by
+moving off Kuhn's cube, and is worth describing in full:
+
+\begin{enumerate}
+\item \textbf{The sibling facet} (the one introduced by the cell's own
+  most recent bisection: $i=\dim$ for a $0$-child, $i=\type$ for a
+  $1$-child) is resolved with \emph{no floating-point arithmetic at all},
+  purely combinatorially, as \texttt{parent().child(other bit)}. By Lemma
+  6's own identity ($\partial_0c_0\omega=\partial_{l-1}c_1\omega$), this is
+  \emph{always} exactly the correct neighbor, same seed, no ambiguity --
+  routing it through any geometric path instead was tried first and broke
+  5--15\% of sampled cases, since that facet sits at a finer scale than a
+  generic geometric-nudge tolerance is tuned for.
+\item For every other facet, an \emph{exact} (integer, dyadic-rational, no
+  floating point) test, \texttt{root\_boundary\_facet()}, decides whether
+  the facet lies precisely on one of the seed's own five bounding
+  hyperplanes -- computed from the same barycentric weights Atalay \&
+  Mount's Theorem 1 gives, but kept as exact integers, since repeated
+  bisection is exact in binary and the denominator never exceeds
+  $2^{\text{MAX\_ORTHANT\_LEVEL}+1}$.
+\item If that test says \emph{interior} (no seed boundary), the original
+  $O(1)$ formula (their Theorem 2) is trusted -- verified, by direct
+  comparison against an independently-implemented geometric fallback, to
+  agree in 132799/132801 ($99.9985\%$) of sampled cases.
+\item If the test says \emph{boundary} (always true for a root cell,
+  every one of whose 5 facets is a boundary by definition), the crossing
+  is resolved through Gaifullin's own precomputed $108\times5$ adjacency
+  table, built from the same ``identical local order on both sides'' fact
+  \Cref{sec:gaifullin}'s search established -- landing on a fresh root of
+  the new seed, with no permutation correction needed.
+\end{enumerate}
+A genuinely unresolved case, \texttt{GLPT\_DEEP\_CROSSING\_UNIMPLEMENTED},
+is reported explicitly (never guessed) when the region across a facet has
+already been refined \emph{deeper} than the querying cell -- enumerating
+which of possibly several finer descendant leaves border a given
+ancestor-level facet was judged out of scope. Orientation coherence at
+arbitrary depth (not just at the 108 root cells) was checked directly:
+750\,000 sampled (cell, facet) pairs across the full representable depth
+range, $0$ violations.
+
+\subsection{The current-leaf set: \texttt{glpt\_tree}}
+\label{sec:tree}
+
+A single packed code identifies a cell, but the \emph{mesh} is the set of
+codes that are currently leaves. \texttt{glpt\_tree} stores exactly that
+set, as an open-addressing hash table (linear probing, one 64-bit slot per
+entry, backward-shift deletion since bisection's continuous
+erase-two-insert churn would otherwise accumulate tombstones
+indefinitely) -- table occupancy is always exactly the current leaf count,
+never a historical operation count, unlike the append-only \texttt{nmt<4>}
+container it replaces.
+
+Two operations complete the picture. \texttt{compat\_bisect(r)} bisects
+$r$, first recursively forcing whichever neighbors are needed to keep the
+mesh \emph{graded} (no facet ever separates cells more than one level
+apart) -- a direct, ported ``needs a neighbor finer first'' recursion,
+using exactly \texttt{glpt::neighbor()} and \texttt{exists()} the way an
+earlier, cube-only implementation of the same idea already did, with three
+real bugs found (not merely by inspection but by an exhaustive
+graded-invariant test) and fixed along the way: a same-level neighbor that
+turns out to be an already-bisected root has no parent to recurse into; a
+neighbor whose parent is already mid-recursion higher up the same call
+stack must not be processed twice; and the absence of a same-level
+neighbor does not always mean it is coarser -- it can instead mean that
+cell was already refined \emph{finer}, by the very same top-level call,
+moments earlier, through a different facet entirely. Verified after the
+fixes at $\sim$40\,000 \texttt{compat\_bisect()} calls cascading to nearly
+4 million leaves, 11.6 million facet checks, 0 graded-invariant violations.
+\texttt{neighbor\_leaf(r,i,\&result)} then layers the tree's actual state
+on top of the bare combinatorial \texttt{neighbor()}: it walks up the
+ancestor chain when the combinatorial candidate is not itself a current
+leaf (always resolvable, since a cell has exactly one ancestor chain), and
+reports \texttt{REFINED\_FURTHER} -- safely skippable, since it means that
+region was already visited from elsewhere -- when the candidate has
+already been split further than the query.
+
+% =====================================================================
+\section{A continuation algorithm for Riemann-surface triangulation}
+\label{sec:continuation}
+% =====================================================================
+
+\subsection{Problem setup}
+
+A smooth plane curve $F(X,Y,Z)=0$ (homogeneous, degree $n$) sits inside
+$\CP^2$ with real codimension 2. Seeding the mesh with Gaifullin's 108
+cells and Maubach-bisecting adaptively, a per-cell extraction step
+(\texttt{extract\_cell}) turns each visited leaf's boundary root-crossings
+-- located by Newton's method on each of its 10 distinct triangular
+2-faces, each face solved once and cached by its global vertex-id triple
+-- into a graph on those crossing points, decomposed into closed
+polygonal cycles that approximate the curve inside that cell. A cell is
+called \emph{bad} when that decomposition fails (a vertex of the crossing
+graph with degree other than 2, or an unhandled multiple-crossing
+configuration on a single facet) -- typically a near-tangency or several
+close crossings on one facet.
+
+\subsection{From global refinement to continuation}
+
+The algorithm's earlier refinement criterion, \emph{gradient dispersion}
+($1-\kappa$, where $\kappa$ measures how aligned $\nabla F$ is across a
+cell's own vertices), is evaluated identically whether or not a cell is
+anywhere near the curve, and drives a priority queue seeded from all 108
+roots. This refines the entire ambient $\CP^2$ -- a real 4-manifold -- to
+resolve a curve of real dimension 2, and is correspondingly wasteful.
+
+The final version of the algorithm instead uses \emph{continuation}:
+starting from one cell the curve is confirmed to touch, it explores
+outward through only the cells the curve actually reaches, using
+precisely the two combinatorial relations of \Cref{sec:lpt} --
+\texttt{compat\_bisect}/\texttt{recent\_leaves} to go deeper, and
+\texttt{neighbor\_leaf} to move sideways once a cell has reached the
+requested depth.
+
+\subsection{The algorithm}
+
+\begin{algorithm}[H]
+\caption{Continuation-based Riemann-surface triangulation (default Phase~1
+of \texttt{riemann\_cp2\_glpt.cpp})}
+\begin{algorithmic}[1]
+\Require Gaifullin's 108-cell seed mesh $T$ (all roots present), curve $F$, target depth $D$
+\State $s \gets$ first $s\in\{0,\dots,107\}$ with $\mathrm{any\_edge}(\mathrm{extract\_cell}(s))=\mathrm{true}$
+\Comment{early-exit scan; skipped entirely for $s'>s$}
+\State $\mathit{visited}\gets\varnothing$; $\mathit{frontier}\gets\{s\}$
+\While{$\mathit{frontier}\neq\varnothing$}
+  \State pop $c$ from $\mathit{frontier}$
+  \If{$c\notin T$ \textbf{or} $c\in\mathit{visited}$} \textbf{continue} \Comment{superseded by an earlier cascade}
+  \EndIf
+  \State $\mathit{visited}\gets\mathit{visited}\cup\{c\}$
+  \State $r\gets\mathrm{extract\_cell}(c)$
+  \If{\textbf{not} $r.\mathrm{any\_edge}$} \textbf{continue} \Comment{curve doesn't reach here}
+  \EndIf
+  \If{$\mathrm{simplex\_level}(c) < D$}
+    \State $T.\mathrm{compat\_bisect}(c)$
+    \State $\mathit{frontier}\gets\mathit{frontier}\cup T.\mathrm{recent\_leaves}()$
+    \Comment{includes any cell a conformity cascade touched elsewhere}
+  \Else
+    \State record $c$ as a final touched leaf (using $r$ already computed)
+    \For{$i=0,\dots,\dim$}
+      \If{$T.\mathrm{neighbor\_leaf}(c,i)=(\textsc{Found},n)$ \textbf{and} $n\notin\mathit{visited}$}
+        \State $\mathit{frontier}\gets\mathit{frontier}\cup\{n\}$
+      \EndIf
+    \EndFor
+  \EndIf
+\EndWhile
+\end{algorithmic}
+\end{algorithm}
+
+The face-crossing cache built while computing $\mathrm{any\_edge}$ above is
+shared with the subsequent per-polygon extraction/output pass, so no
+2-face crossing is ever solved twice.
+
+\subsubsection*{Correctness sketch}
+
+If the curve crosses cell $A$'s facet $f$, shared with a neighbor $B$, it
+must be present, at least infinitesimally, on $B$'s side of $f$ too -- a
+1-dimensional curve entering a 4-cell through a shared 3-facet cannot stop
+exactly at that facet -- so $\mathrm{any\_edge}(B)$ is guaranteed once the
+search reaches it via a genuine crossing facet, and the propagation never
+has to guess. This is, however, an argument for recovering a single
+\emph{connected component} of $\{F=0\}$: a reducible curve with several
+irreducible factors would need one seed per component, which the current
+implementation does not attempt.
+
+\subsection{Measured results}
+
+For every one of the six catalog test curves (conic, Fermat cubic, a
+generic Hesse-pencil cubic, a smooth quartic, a parabola, and a smooth
+elliptic curve -- all connected), continuation recovers the exact same
+final leaf set, and the exact same bad-cell count, as an independent
+reference that applies the same $\mathrm{any\_edge}$ test to all 108 roots
+directly rather than propagating -- checked at depths 8, 12, and 14. Two
+further, independent measurements:
+
+\begin{itemize}
+\item \textbf{Mesh size}, relative to the earlier gradient-dispersion
+  Phase~1 at the same depth and refinement threshold: $62$--$82\%$ of the
+  old leaf count at depth 8, falling to $17$--$34\%$ at depth 14 -- a
+  $3$--$6\times$ smaller mesh, with the gap widening as depth increases.
+\item \textbf{Bad-cell rate}: never worse than the old criterion across
+  the six curves, and strictly better on two of them (a conic, $20.13\%
+  \to17.81\%$; a parabola, $18.78\%\to17.33\%$) -- exactly the curves
+  where the old gradient-dispersion signal had been stopping refinement of
+  a touched cell before it reached full depth.
+\end{itemize}
+
+A concrete run, the deepest attempted so far: the smooth elliptic curve
+$X^2Z-Y^3+YZ^2=0$, seed rotated by a random unitary change of basis (to
+avoid the curve resonating with the seed's own coordinate axes), at depth
+20, produced 4\,620\,102 leaves, with 222\,981 cleanly-extracted cells and
+1\,348 bad ones (a $0.60\%$ bad-cell rate, itself continuing the
+already-documented trend that this rate falls with depth). Two additional
+targeted repair rounds -- re-bisecting specifically the cells that failed
+extraction, up to a small extra depth budget, then re-extracting -- brought
+this down to 678 bad cells out of 227\,355 ($0.30\%$).
+
+The bad-cell rate measures \emph{topological} correctness -- whether a
+cell's crossing graph decomposes into simple closed polygons at all -- but
+says nothing about how accurately those polygons' own vertices actually
+sit on the curve. To check that separately, we evaluated $|F(v)|$ at
+every \emph{distinct} extracted crossing point $v$ (deduped by output-
+vertex identity, the same identity \Cref{sec:continuation}'s alpha
+projection uses for its own global vertex dedup) for this same depth-20
+run: 164\,390 distinct points -- matching, as a cross-check, the vertex
+count \texttt{--alpha-projection} itself reports for this run -- with
+$|F(v)|$ median $1.0\times10^{-16}$, mean $3.0\times10^{-14}$ (pulled up
+by a small tail), 95th/99th percentile $2.0\times10^{-13}$/$4.3\times
+10^{-13}$, and maximum $9.8\times10^{-13}$. Every one of these values is
+within a few orders of magnitude of double-precision machine epsilon
+($\approx2.2\times10^{-16}$) relative to $F$'s own natural scale on unit-
+norm homogeneous coordinates -- Newton's method (\Cref{sec:continuation}'s
+own root-finding, inside \texttt{extract\_cell}) is not merely finding
+\emph{a} crossing point per facet, but converging to the true zero locus
+to essentially full floating-point precision.
+
+\subsection{Limitations}
+
+The algorithm as implemented recovers exactly one connected component of
+the curve; a reducible curve needs one seed per irreducible factor, not
+yet implemented. A separate investigation, summarized here only for
+completeness, ruled out one plausible cause of the residual bad cells: the
+geodesic (Fubini--Study) midpoint used for every edge bisection does
+\emph{not} split the two children's volumes evenly, unlike the Euclidean
+case -- measured directly via a Cayley--Menger volume proxy built from
+true geodesic distances -- but that imbalance turns out \emph{not} to
+correlate with which cells end up bad; if anything, the bad-cell rate
+\emph{falls} as the imbalance of the bisection that created a cell grows.
+Bad cells remain concentrated instead on genuine near-tangencies and
+multiple close crossings on a single facet -- an orthogonal geometric
+phenomenon, not addressed by this report.
+
+% =====================================================================
+\section{Conclusion}
+% =====================================================================
+
+Maubach's invariants (Definition 9, Chapter 4 of the thesis) are a purely
+combinatorial condition, and the thesis's own two constructive routes to
+satisfying it -- products of simplices and barycentric subdivision -- both
+work by exhibiting a global vertex rank, a structure tied closely to
+Kuhn's cube and to dimension $\le3$, the setting the rest of the thesis
+develops the idea in. This report showed the condition is more general
+than that: reformulated as a local, per-facet coloring problem on a mesh's
+dual graph, it is decidable by direct search for \emph{any} fixed
+triangulation, with no algebraic symmetry required at all, and Gaifullin's
+108-cell, real-dimension-4 triangulation of $\CP^2$ satisfies it this way.
+Built on top of that mesh, an economical LPT-style cell code (extending
+Atalay \& Mount's original pointerless scheme, with its neighbor-finding
+rules substantially reworked once the seed cells stop forming a single
+group orbit) supports, as a genuine downstream application, an adaptive
+triangulation algorithm for algebraic curves -- Riemann surfaces -- living
+directly inside $\CP^2$, whose current, continuation-based version
+recovers a curve's mesh at a fraction of the earlier algorithm's memory
+cost, at depths and mesh sizes the original \texttt{nmt<4>}-based
+implementation could not reach at all.
+
+% =====================================================================
+\appendix
+\section{Products of already-compatible meshes}
+\label{app:product}
+% =====================================================================
+
+This appendix answers a question that arose naturally, not from the $\CP^2$
+work of the main text, but from an earlier stage of the same broader
+project: the first implementation of \texttt{examples/top/riemann}'s own
+Riemann-surface triangulator, which realizes a curve's ambient space not
+as $\CP^2$ but as $S^2\times S^2$ (two identified Riemann spheres), seeded
+the mesh by triangulating each $S^2$ factor as an \emph{octahedron} (the
+boundary of the cross-polytope: 6 vertices, 8 triangular faces) and
+combining the two via the classical Eilenberg--Zilber \emph{shuffle}
+product -- the same monotone-lattice-path recipe Theorem 9 uses for a
+product of simplices, but now with each factor already a small
+multi-cell mesh rather than a single simplex. Theorem 9, taken literally,
+does not cover this: an octahedron is not a simplex. This raises the
+natural question answered below -- does the same construction, applied to
+two meshes that are \emph{themselves} already known to satisfy the
+thesis's strong compatibility property, still produce a compatible
+product?
+
+\begin{propthm}[Product of compatible meshes]
+\label{prop:product}
+Let $K_1$ be an $m_1$-dimensional mesh equipped with a \emph{global rank}
+$\mathrm{rank}_1:V(K_1)\to\{0,\dots,m_1\}$ such that every top cell
+$\sigma_1=\langle\sigma_1[0],\dots,\sigma_1[m_1]\rangle$ of $K_1$ satisfies
+$\mathrm{rank}_1(\sigma_1[l])=l$ for every $l$ -- i.e., $K_1$ satisfies the
+strong form $\partial_i\sigma=\partial_j\omega\Rightarrow i=j$ of the
+Maubach invariants, realized (as in Theorems 9 and 10, \Cref{sec:tworoutes})
+by an explicit global rank. Let $K_2,\mathrm{rank}_2,m_2$ be likewise. Let
+$K_1\times K_2$ be triangulated by the canonical cell-by-cell extension of
+the monotone-path construction: for every pair of top cells
+$(\sigma_1,\sigma_2)\in K_1\times K_2$, triangulate the prism
+$\sigma_1\times\sigma_2$ exactly as in Theorem 9's proof (vertices
+$v_L=(\sigma_1[L^1],\sigma_2[L^2])$ for $L=(L^1,L^2)$ in the lattice
+$P=\{0,\dots,m_1\}\times\{0,\dots,m_2\}$, cells indexed by monotone paths
+in $P$), and glue these triangulated prisms together. Then $K_1\times
+K_2$ also satisfies the strong Maubach invariants.
+\end{propthm}
+
+\begin{proof}
+Define, on the vertex set $V(K_1)\times V(K_2)$ of the product,
+\[
+  \mathrm{RANK}(a,b) \;:=\; \mathrm{rank}_1(a) + \mathrm{rank}_2(b),
+\]
+which is well defined globally -- it depends only on the actual vertex
+pair $(a,b)$, not on which prism $\sigma_1\times\sigma_2$ we view it
+through. Consider any top cell $\tau=\langle v_{L_0},\dots,v_{L_s}\rangle$
+of the product triangulation ($s=m_1+m_2$), living in some prism
+$\sigma_1\times\sigma_2$, with $L_0,\dots,L_s$ a monotone path in $P$ from
+$(0,0)$ to $(m_1,m_2)$. Since each step of a monotone path increases
+$L^1+L^2$ by exactly $1$ and $L_0=(0,0)$, we have $|L_l|:=L^1_l+L^2_l=l$
+for every $l$. Hence
+\[
+  \mathrm{RANK}(\tau[l]) \;=\; \mathrm{rank}_1(\sigma_1[L^1_l]) +
+  \mathrm{rank}_2(\sigma_2[L^2_l]) \;=\; L^1_l + L^2_l \;=\; l ,
+\]
+using $\mathrm{rank}_1(\sigma_1[L^1_l])=L^1_l$ and
+$\mathrm{rank}_2(\sigma_2[L^2_l])=L^2_l$, which hold by hypothesis on
+$K_1,K_2$ individually. So \emph{every} top cell of the glued product --
+in any prism whatsoever -- has its $l$-th vertex at global rank exactly
+$l$; this did not use anything about $\tau,\tau'$ being in the same or
+different prisms.
+
+Now let $\tau,\tau'$ be any two facet-adjacent cells of $K_1\times K_2$,
+with $\partial_i\tau=\partial_j\tau'$. The $s$ vertices of this shared
+facet have, read off from $\tau$'s own labelling, ranks
+$\{0,\dots,s\}\setminus\{i\}$, and read off from $\tau'$'s, ranks
+$\{0,\dots,s\}\setminus\{j\}$ -- but $\mathrm{RANK}$ is a single global
+function of the vertex, so these are the same set of ranks for the same
+set of vertices, forcing $\{0,\dots,s\}\setminus\{i\}=\{0,\dots,s\}
+\setminus\{j\}$, hence $i=j$.
+\end{proof}
+
+\begin{remthm}
+This is exactly Theorem 9's own argument, with $|L|$ replaced by
+$\mathrm{RANK}$ -- Theorem 9 is recovered verbatim as the special case
+where $K_1,\dots,K_n$ are each a single bare simplex $\Delta^{m_i}$ (whose
+``rank'' is simply its own vertex order, with nothing to verify, since a
+single simplex has no facet-adjacency at all to check). The genuinely new
+content of \Cref{prop:product} is that it also handles $K_1$ or $K_2$
+having \emph{more than one cell}, which requires checking that gluing
+across different $(\sigma_1,\sigma_2)$ prisms stays consistent -- and the
+proof shows this is automatic, precisely because $\mathrm{RANK}$ was
+defined once, on the vertex set, rather than separately per prism.
+\end{remthm}
+
+\begin{remthm}[Verification on a small example]
+Take $K_1$ the path $v_0\!-\!v_1\!-\!v_2$ (two edges), with
+$\mathrm{rank}_1(v_0)=\mathrm{rank}_1(v_2)=0$, $\mathrm{rank}_1(v_1)=1$
+(forcing the second edge to be oriented $\langle v_2,v_1\rangle$, not
+$\langle v_1,v_2\rangle$, to respect this rank), and $K_2$ a single edge
+$\langle w_0,w_1\rangle$. This is the smallest instance where one factor
+has more than one cell. $K_1\times K_2$ is two unit squares sharing an
+edge, each split into two triangles by the usual recipe. Checking all
+three non-trivial adjacent pairs by hand -- the two triangles \emph{within}
+one square, and the two triangles facing each other \emph{across} the
+shared square-to-square edge -- confirms $i=j$ in every case, matching
+$\mathrm{RANK}$ exactly as \Cref{prop:product} predicts.
+\end{remthm}
+
+\begin{remthm}[Local compatibility is not enough -- a caveat]
+\label{rem:localglobal}
+\Cref{prop:product}'s hypothesis is that $K_1,K_2$ each admit a
+\emph{global} rank -- which is stronger than merely satisfying the strong
+invariant \emph{pairwise}, cell by adjacent cell (the sense in which
+\Cref{sec:gaifullin}'s search establishes compatibility for Gaifullin's
+own triangulation, with no global rank claimed or checked there). The two
+notions are not automatically equivalent: consider the $1$-dimensional
+mesh consisting of a single $3$-cycle of edges (a triangle, as a graph,
+not as a filled $2$-simplex). Every pair of adjacent edges can be locally
+reordered to agree at their shared vertex ($i=j$), exactly as in the path
+example above -- but no consistent global $2$-coloring of its three
+vertices exists, since a $3$-cycle is not bipartite. This is the same
+odd-cycle obstruction already met in \Cref{sec:gaifullin} for Kühnel's
+triangulation, there blocking global \emph{orientation} coherence rather
+than a rank; here it blocks the rank itself. So \Cref{prop:product} may
+not be invoked for a product whose factors are only known compatible in
+the weaker, local sense -- one must exhibit (or separately verify) an
+actual global rank on each factor first, exactly as the octahedron example
+below does.
+\end{remthm}
+
+\begin{remthm}[The motivating case: the octahedron]
+An octahedron -- vertices $\pm e_1,\pm e_2,\pm e_3$, one face per sign
+choice $(\pm,\pm,\pm)$ -- admits an explicit global rank realizing the
+strong invariant directly: set $\mathrm{rank}(\pm e_k):=k-1\in\{0,1,2\}$
+(color a vertex by \emph{which coordinate axis} it lies on, ignoring
+sign). Every face has exactly one vertex on each axis by construction, so
+every face is automatically rainbow under this coloring. \Cref{prop:product}
+therefore applies directly to $K_1=K_2=$ (octahedron), confirming that the
+$S^2\times S^2$ seed mesh's own compatibility -- observed, but not
+previously derived from a general statement -- is an instance of a
+genuine theorem, not a coincidence particular to that one mesh.
+\end{remthm}
+
+% =====================================================================
+\section{Translated proofs of Theorems 8--10, and Maubach's algorithm}
+\label{app:proofs}
+% =====================================================================
+
+The thesis this report is based on~\cite{mello2006} was published only in
+Portuguese. For
+direct traceability against the original source, this appendix gives
+literal English translations of the proofs of Theorems 8, 9 and 10
+(stated without proof in \Cref{sec:maubach,sec:tworoutes} of the main
+text), together with a full reproduction of Maubach's own subdivision
+algorithm (\emph{Listagem 4.2} of the thesis, p.\,47).
+
+\subsection*{Theorem 8}
+
+\begin{thmthm}[Theorem 8]
+Let $K$ be an $m$-dimensional mesh satisfying the Maubach invariants and
+$\sigma$ a cell of $K$. Then the mesh $K'$ resulting from applying
+Algorithm~4.2 to $(K,\sigma)$ also satisfies the Maubach invariants.
+Moreover, the algorithm is consistent, alternating, and balanced.
+\end{thmthm}
+
+\begin{proof}
+By induction on the level of $\sigma$. Let $l$ be the smallest value
+assumed by the function $\level$ on $K$. If $\level(\sigma)=l$, it follows
+from Lemma 5 that cells adjacent to $\sigma$ that share the subdivision
+edge $\epsilon=\sigma[0,\type(\sigma)]$ also have level $l$. Hence the
+recursion on line 19 [of Algorithm~4.2] is not executed, and the loop
+between lines 8--26 does nothing more than traverse the star of $\epsilon$
+and store it in the list $\mathrm{st}$. Applying Lemma 7 to every pair of
+adjacent cells $(\sigma',\omega')$, with $\omega'\in\st(\epsilon,K)$, we
+get that the subdivision performed on line 28 results in a mesh $K'$
+satisfying the statement. If $\level(\sigma)>l$, we can use Lemma 5 and
+the induction hypothesis on line 19 to reduce to a case similar to the
+initial one.
+\end{proof}
+
+\subsection*{Theorem 9}
+
+\begin{thmthm}[Theorem 9]
+Let $\mathrm{Tr}(\Sigma)$ be a mesh representing the canonical
+triangulation of the product of $n$ simplices $\Sigma=\Delta^{m_1}\times
+\Delta^{m_2}\times\cdots\times\Delta^{m_n}$. Then, for any cells
+$\sigma,\omega\in\mathrm{Tr}(\Sigma)$,
+\[
+  \partial_i\sigma=\partial_j\omega \;\Longrightarrow\; i=j.
+\]
+In particular, $\mathrm{Tr}(\Sigma)$ satisfies the Maubach invariants.
+\end{thmthm}
+
+\begin{proof}
+A basic property of the construction above is that for every cell
+$\sigma\in\mathrm{Tr}(\Sigma)$,
+\[
+  \sigma[j]=v_L \;\Longleftrightarrow\; |L|=j .
+\]
+Let $\sigma,\omega\in\mathrm{Tr}(\Sigma)$ be two adjacent cells, with
+$\sigma=\langle v_{L_0},\dots,v_{L_s}\rangle$ and $\omega=\langle
+v_{L'_0},\dots,v_{L'_s}\rangle$, such that $\partial_i\sigma=\langle
+v_{L''_0},\dots,v_{L''_{s-1}}\rangle=\partial_j\omega$. Then there is a
+unique $k\in\{0,\dots,s\}$ such that $k\notin\{|L''_0|,\dots,|L''_{s-1}|\}$.
+Therefore $|L_i|=k=|L'_j|$, hence $i=k=j$. Note that $k\notin\{0,s\}$,
+since for every cell $\sigma\in\mathrm{Tr}(\Sigma)$, $\sigma[0,s]=\langle
+v_{(0,\dots,0)},v_{(m_1,\dots,m_n)}\rangle$.
+\end{proof}
+
+\subsection*{Theorem 10}
+
+\begin{thmthm}[Theorem 10]
+Let $K$ be an $n$-dimensional mesh. Then, for any cells $\sigma,\omega\in
+B(K)$,
+\[
+  \partial_i\sigma=\partial_j\omega \;\Longrightarrow\; i=j.
+\]
+In particular, $B(K)$ satisfies the Maubach invariants.
+\end{thmthm}
+
+\begin{proof}
+A basic property of the construction above is that for every cell
+$\sigma\in B(K)$,
+\[
+  \sigma[j]=v_\delta \;\Longleftrightarrow\; d(\delta)=j .
+\]
+Let $\sigma,\omega\in B(K)$ be two adjacent cells, with $\sigma=\langle
+v_{\delta_0},\dots,v_{\delta_n}\rangle$ and $\omega=\langle
+v_{\delta'_0},\dots,v_{\delta'_n}\rangle$, such that $\partial_i\sigma=
+\langle v_{\delta''_0},\dots,v_{\delta''_{n-1}}\rangle=\partial_j\omega$.
+Then there is a unique $k\in\{0,\dots,n\}$ such that $k\notin\{
+d(\delta''_0),\dots,d(\delta''_{n-1})\}$. Therefore $d(\delta_i)=k=
+d(\delta'_j)$, hence $i=k=j$.
+\end{proof}
+
+\subsection*{Maubach's subdivision algorithm}
+
+Below is Maubach's subdivision algorithm (\emph{Listagem 4.2} of the
+thesis, p.\,47), given here as pseudocode -- translated in structure and
+notation, not transcribed literally from the (mildly archaic,
+templated-C++-style) original listing. $k$ is exactly $\type(\sigma)$;
+$\mathrm{st}$ (built up as cells are visited) ends up being
+$\st(\epsilon,K)$, the star of the subdivision edge
+$\epsilon=\sigma[0,k]$ computed at the end; and the recursive call is
+precisely the ``propagate to whichever neighbor has a smaller level
+first'' step that Theorem 8's proof, above, inducts on.
+
+\begin{algorithm}[H]
+\caption{\textsc{MaubachSubdivide}$(K,\sigma)$ (translated from \emph{Listagem 4.2}, p.\,47)}
+\begin{algorithmic}[1]
+\Require conforming $m$-dimensional mesh $K$, cell $\sigma\in K$ to subdivide
+\State $k \gets \type(\sigma)$ \Comment{$=m-(\level(\sigma)\bmod m)$}
+\State $\mathrm{st} \gets$ empty list; $\mathit{to\_visit} \gets$ queue containing $\sigma$
+\While{$\mathit{to\_visit}$ is not empty}
+  \State $c \gets \mathit{to\_visit}.\mathrm{front}()$; $\mathit{to\_visit}.\mathrm{pop}()$
+  \If{$c$ is not marked visited}
+    \State mark $c$ visited; append $c$ to $\mathrm{st}$
+    \For{$i=0,\dots,m$}
+      \If{$i=0$ or $i=k$} \textbf{continue} \Comment{these two facets pass to a child whole -- see Lemma 7's own remark}
+      \EndIf
+      \State $c_a \gets \mathrm{adjacent}(c,i)$
+      \If{$c_a$ is not marked visited}
+        \If{$\level(c_a) < \level(c)$}
+          \State \textsc{MaubachSubdivide}$(K,c_a)$
+          \State $c_a \gets \mathrm{adjacent}(c,i)$ \Comment{re-fetch: a child of $c_a$ now occupies this facet}
+        \EndIf
+        \State push $c_a$ onto $\mathit{to\_visit}$
+      \EndIf
+    \EndFor
+  \EndIf
+\EndWhile
+\State $\epsilon \gets \sigma[0,k]$ \Comment{the subdivision edge}
+\State \textsc{MaubachEdgeSplit}$(K,\epsilon,k,\mathrm{st})$ \Comment{bisects $\epsilon$, splitting every cell of $\mathrm{st}=\st(\epsilon,K)$}
+\end{algorithmic}
+\end{algorithm}
+
+% =====================================================================
+\begin{thebibliography}{99}
+
+\bibitem{mello2006}
+Vinícius Moreira Mello.
+\emph{Novos Métodos Simpliciais em Computação Gráfica}.
+Tese de Doutorado, Instituto de Matemática Pura e Aplicada (IMPA), Rio de
+Janeiro, 2006. Advisor: Luiz Velho.
+
+\bibitem{maubach}
+J.M. Maubach.
+\emph{Local bisection refinement for $N$-simplicial grids generated by
+reflection}.
+SIAM J. Sci. Stat. Comput., 16:210--227, 1995.
+
+\bibitem{mitchell}
+W.F. Mitchell.
+\emph{Optimal multilevel iterative methods for adaptive grids}.
+SIAM J. Sci. Stat. Comput., 13:146--167, 1992.
+
+\bibitem{gomestavares}
+Jonas Gomes and Geovan Tavares.
+\emph{Métodos Simpliciais em Computação Gráfica}.
+17\textordmasculine\ Colóquio Brasileiro de Matemática, 1989.
+
+\bibitem{lickorish}
+W.B.R. Lickorish.
+\emph{Simplicial moves on complexes and manifolds}.
+In Proceedings of the Kirbyfest, volume 2, pages 299--320, 1999.
+
+\bibitem{atalaymount}
+F. Betul Atalay and David M. Mount.
+\emph{Pointerless implementation of hierarchical simplicial meshes and
+efficient neighbor finding in arbitrary dimensions}.
+International Journal of Computational Geometry \& Applications, 2007.
+
+\bibitem{gaifullin}
+A.A. Gaifullin.
+\emph{Construction of combinatorial manifolds with prescribed sets of
+links of vertices}.
+arXiv:0904.4222.
+
+\bibitem{schwartz}
+R.E. Schwartz.
+\emph{Trisecting the 9-vertex complex projective plane}.
+arXiv:2205.00595.
+
+\end{thebibliography}
+
+% =====================================================================
+\section*{Note on AI assistance}
+% =====================================================================
+
+The implementation this report describes -- the \texttt{glpt}/
+\texttt{glpt\_tree} pointerless mesh, the Gaifullin-compatibility search,
+the neighbor-finding rules of \Cref{sec:lpt}, the continuation algorithm
+of \Cref{sec:continuation}, and the various diagnostic investigations
+(volume imbalance, bad-cell correlation) referenced along the way -- was
+developed with Claude (Anthropic) acting as a coding assistant across many
+work sessions, under the author's direction, review, and testing. This
+report itself was likewise drafted with Claude's assistance, including
+the verification of Lemmas 5--7 in \Cref{sec:maubach}, the translations
+and pseudocode of \Cref{app:proofs}, and \Cref{app:product}'s proof --
+again under the author's direction and review throughout.
+
+\end{document}
