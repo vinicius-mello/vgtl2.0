@@ -132,7 +132,7 @@ original page image). \Cref{sec:gaifullin} shows how Gaifullin's
 triangulation is made Maubach-compatible: not via a global rank, but by
 reformulating Definition 9 as a graph-coloring search on the mesh's dual
 graph, solved once, offline, by exact backtracking, and cross-checked
-against GAP's \texttt{simpcomp} package. \Cref{sec:lpt} describes the
+against GAP's~\cite{gap} \texttt{simpcomp}~\cite{simpcomp} package. \Cref{sec:lpt} describes the
 economical, pointerless cell representation this project built on top of
 that mesh -- an extension of Atalay \& Mount's LPT
 codes~\cite{atalaymount} -- with particular attention to what changes in
@@ -433,47 +433,72 @@ whether it carries any algebraic symmetry, simply by search.
 
 The mesh used throughout the rest of this report is A.~Gaifullin's
 15-vertex triangulation of $\CP^2$~\cite{gaifullin} (Construction 1.1 and
-\S3 of that paper), independently cross-checked against GAP's
-\texttt{simpcomp} library (SCLib entry \#397, ``Gaifullin CP\textasciicircum2'',
-identical f-vector and facet list up to relabeling). Its 15 vertices are
+\S3 of that paper), independently cross-checked against GAP's~\cite{gap}
+\texttt{simpcomp}~\cite{simpcomp} library (SCLib entry \#397, ``Gaifullin
+CP\textasciicircum2'', identical f-vector and facet list up to
+relabeling). Its 15 vertices are
 labelled by $(V_4\setminus\{e\})\,\dot\cup\,(\{1,2,3,4\}\times\{1,2,3\})$,
 where $V_4$ is the Klein four-group inside $S_4$; its 108 four-simplices
 have $f$-vector $(f_0,\dots,f_4)=(15,90,240,270,108)$, matching $\CP^2$'s
 own Euler characteristic $3$ ($f_0-f_1+f_2-f_3+f_4=15-90+240-270+108=3$).
 
-Two independent combinatorial facts about this triangulation were verified
-by exact backtracking search (this project's own offline computation, not
-part of Gaifullin's paper) and cross-checked against \texttt{simpcomp}:
+Two combinatorial facts about this triangulation matter here, both
+statements about its 108-node, 5-regular dual graph (one node per cell,
+one edge per shared tetrahedral facet -- $108\times5/2=270$ edges,
+matching $f_3=270$ exactly, with a facet-owner histogram of $\{2:270\}$
+confirming every facet is shared by exactly two cells, a genuine closed
+pseudomanifold):
 
 \begin{itemize}
-\item \textbf{Maubach compatibility.} The 108-node, 5-regular dual graph
-  (one edge per shared tetrahedral facet -- $108\times5/2=270$ edges,
-  matching $f_3=270$ exactly) admits a proper 5-edge-coloring: a facet-owner
-  histogram of $\{2:270\}$ confirms every facet is shared by exactly two
-  cells (a genuine closed pseudomanifold), and $0$ same-index mismatches
-  confirms the coloring realized above satisfies $\partial_i\sigma=
-  \partial_j\omega\Rightarrow i=j$ for every one of the 270 shared facets
-  -- the \emph{strong} form, with no need of the $\{0,m\}$ exception at
-  all.
-\item \textbf{Global orientation coherence.} The same dual graph is
-  bipartite (verified by breadth-first 2-coloring, $0$ conflicts), which is
-  exactly the condition needed for a globally coherent choice of cell
-  orientations under the standard $(-1)^{\text{local index}}$
-  boundary-operator sign convention: adjacent cells must always induce
-  \emph{opposite} orientations on their shared facet, and a BFS sign
-  propagation over a non-bipartite dual graph would hit a contradiction on
-  some odd cycle.
+\item \textbf{Chess colouring (Gaifullin's own term) / orientation
+  coherence.} Gaifullin's paper~\cite{gaifullin} proves this triangulation
+  admits a \emph{chess colouring}: a black/white 2-colouring of the 108
+  four-simplices such that any two sharing a facet get different colours
+  -- exactly a proper 2-colouring of the dual graph, i.e.\ the dual graph
+  is \emph{bipartite}. This is not an incidental fact this project
+  discovered independently; it is a defining property of Gaifullin's
+  construction (his own theorem states this triangulation is the minimal
+  one admitting such a colouring), which we simply re-verified directly
+  (breadth-first 2-colouring, $0$ conflicts, cross-checked against
+  \texttt{simpcomp}~\cite{simpcomp}). It is exactly the condition needed
+  for a globally coherent choice of cell orientations under the standard
+  $(-1)^{\text{local index}}$ boundary-operator sign convention: adjacent
+  cells must always induce \emph{opposite} orientations on their shared
+  facet, and a sign propagation over a non-bipartite dual graph would hit
+  a contradiction on some odd cycle.
+\item \textbf{Maubach compatibility.} The same dual graph admits a proper
+  5-edge-colouring realizing $\partial_i\sigma=\partial_j\omega\Rightarrow
+  i=j$ for every one of the 270 shared facets ($0$ same-index mismatches,
+  the \emph{strong} form, with no need of the $\{0,m\}$ exception at all)
+  -- found by exact backtracking search over the dual graph's edges.
 \end{itemize}
 
-Both properties are logically independent -- a triangulation can satisfy
-either without the other -- and both reduce to search on the same
-structure (the dual graph), rather than to any inherited algebraic
-symmetry. The 108 cells' local vertex orders, as actually used everywhere
+\begin{remthm}[Why the second fact was never really in doubt]
+These are not two independent coincidences. By \emph{K\H{o}nig's
+edge-colouring theorem}, every bipartite graph has chromatic index exactly
+equal to its maximum degree $\Delta$ (bipartite graphs are always ``Class
+1''). The dual graph is $5$-regular ($\Delta=5$, since every $4$-simplex
+has exactly $5$ facets); once it is known to be bipartite -- Gaifullin's
+own chess colouring, above -- König's theorem \emph{guarantees a priori}
+that a proper $5$-edge-colouring exists. So the backtracking search for
+Maubach compatibility was not searching for something that might not
+exist: its existence already followed from Gaifullin's own chess-colouring
+theorem: the search only had to \emph{construct} an explicit instance,
+which the implementation then uses directly as the 108 cells' local
+vertex order. The implication runs one way only, though: bipartiteness
+is the strictly stronger property. A $5$-regular graph can be Class~1
+(5-edge-colorable) without being bipartite -- which is exactly Kühnel's
+own situation in \Cref{sec:kuhnel} below: Maubach-compatible, but not
+orientable.
+\end{remthm}
+
+The 108 cells' local vertex orders, as actually used everywhere
 in the implementation, are precisely the ones this search assigned: local
 position $i$ of a vertex in a cell is the color the 5-edge-coloring gave to
 the facet opposite it.
 
 \subsection{A cautionary counterexample: Kühnel's triangulation}
+\label{sec:kuhnel}
 
 An earlier stage of this project attempted the same route with W.~Kühnel
 and T.~Banchoff's classical 9-vertex, 36-cell minimal triangulation of
@@ -533,22 +558,26 @@ machinery verbatim -- it is dimension-generic and independent of which
 seed cell a code descends from -- and adds one field, \texttt{seed\_index}
 $\in\{0,\dots,107\}$, selecting which of Gaifullin's 108 root cells a given
 code belongs to. The resulting cell identity is a handful of bit-packed
-fields fitting in a single machine word:
+fields, all fitting in one 64-bit machine word (\texttt{uint64\_t}):
 
 \begin{center}
-\begin{tabular}{@{}lccccc@{}}
+\begin{tabular}{@{}lcccccc@{}}
 \toprule
-field & \texttt{seed} & \texttt{level} & \texttt{sigperm} & \texttt{orthant\_level} & \texttt{orth} \\
+field & \texttt{seed} & \texttt{level} & \texttt{sigperm} & \texttt{orthant\_level} & \texttt{orth}[0..3] & total \\
 \midrule
-width (bits) & 7 & 2 & 9 & 4 & 10 \\
-range & $0..107$ & $0..3$ & $0..383$ & -- & -- \\
+width (bits) & 7 & 2 & 9 & 4 & $4\times10=40$ & \textbf{62} \\
+range & $0..107$ & $0..3$ & $0..383$ & -- & -- & (of 64) \\
 \bottomrule
 \end{tabular}
 \end{center}
 
--- 32 bits in total, no pointers, no per-cell incidence data stored
-anywhere. Storage cost is $O(1)$ per \emph{current leaf}, not per cell ever
-created (\Cref{sec:tree} below).
+-- 62 of the word's 64 bits, no pointers, no per-cell incidence data
+stored anywhere. (\texttt{orth} is not a single field: it is one
+$10$-bit coordinate \emph{per dimension} -- $\dim=4$ coordinates, since
+one bit is appended to each of them on every subdivision round -- not the
+single field a first glance at the table might suggest.) Storage cost is
+$O(1)$ per \emph{current leaf}, not per cell ever created
+(\Cref{sec:tree} below).
 
 Gaifullin's 108 cells are \textbf{not} a group orbit -- they are 108
 independently-specified vertex-order lists, related to each other only by
@@ -1143,6 +1172,17 @@ arXiv:0904.4222.
 R.E. Schwartz.
 \emph{Trisecting the 9-vertex complex projective plane}.
 arXiv:2205.00595.
+
+\bibitem{gap}
+The GAP Group.
+\emph{GAP -- Groups, Algorithms, and Programming}.
+\url{https://www.gap-system.org}.
+
+\bibitem{simpcomp}
+Felix Effenberger and Jonathan Spreer.
+\emph{simpcomp -- a GAP toolbox for simplicial complexes}.
+ACM Communications in Computer Algebra, 44(4):186--189, 2010.
+arXiv:1004.1367.
 
 \end{thebibliography}
 
