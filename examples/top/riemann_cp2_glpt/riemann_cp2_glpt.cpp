@@ -38,6 +38,15 @@
 // has an experimental --repair-rounds/--repair-extra-depth (not in
 // riemann_cp2.cpp): force-refines specifically the cells extraction
 // failed on, then re-extracts -- see that flag's own comment below.
+// --tangency-threshold/--tangency-extra-depth (also not in
+// riemann_cp2.cpp) is the PROACTIVE counterpart: glpt_extraction.hpp's
+// crossing_transversality() score, measured (2026-09-27) to predict
+// bad-cell risk with a strong, mostly monotonic gradient (22% bad rate
+// for score<=0.05, down to ~3% for score in (0.6,0.8]), is checked on
+// every cell continuation would otherwise finalize at --depth; a
+// suspiciously near-tangent one gets bisected further first, up to
+// --tangency-extra-depth beyond --depth, instead of waiting for
+// extraction to actually fail before --repair-rounds can act on it.
 // Deliberately NOT ported: riemann_cp2.cpp's --onion mode (flat+alpha
 // are enough to see the extracted surface; onion is deferred, not
 // required).
@@ -368,6 +377,8 @@ int main(int argc, char* argv[]) {
 	int repair_rounds=0;
 	int repair_extra_depth=4;
 	bool legacy_priority_refine=false;
+	double tangency_threshold=0.0; // 0 = disabled
+	int tangency_extra_depth=4;
 
 	for(int i=1;i<argc;++i) {
 		string arg=argv[i];
@@ -386,13 +397,16 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--bernstein-selftest") { bernstein_selftest_flag=true; }
 		else if(arg=="--repair-rounds" && i+1<argc) { repair_rounds=atoi(argv[++i]); }
 		else if(arg=="--repair-extra-depth" && i+1<argc) { repair_extra_depth=atoi(argv[++i]); }
+		else if(arg=="--tangency-threshold" && i+1<argc) { tangency_threshold=atof(argv[++i]); }
+		else if(arg=="--tangency-extra-depth" && i+1<argc) { tangency_extra_depth=atoi(argv[++i]); }
 		else if(arg=="--legacy-priority-refine") { legacy_priority_refine=true; }
 		else if(arg=="--list") { print_function_catalog_cp2(cout); return 0; }
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
 				<<"[--flat] [--alpha-projection] [--cutoff X] [--generic] [--generic-seed N] [--proximity] "
 				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] "
-				<<"[--repair-rounds N] [--repair-extra-depth N] [--legacy-priority-refine] [--list]"<<endl;
+				<<"[--repair-rounds N] [--repair-extra-depth N] "
+				<<"[--tangency-threshold X] [--tangency-extra-depth N] [--legacy-priority-refine] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
 			return 0;
 		}
@@ -499,6 +513,7 @@ int main(int argc, char* argv[]) {
 	} else {
 		int seed_root=-1;
 		long n_cells_tested=0;
+		long n_tangency_refined=0;
 		for(int s=0;s<GLPT_NCELLS;++s) {
 			pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
 			cell_points_and_ids(glpt(s), gp, id_cache, pts, ids);
@@ -524,7 +539,19 @@ int main(int argc, char* argv[]) {
 				extract_cell(pts, ids, fcache, res);
 				++n_cells_tested;
 				if(!res.any_edge) continue;        // curve doesn't reach here -- stop
-				if(c.simplex_level()<max_depth) {
+				// --tangency-threshold: a cell whose min_transversality (see
+				// glpt_extraction.hpp's own comment) is suspiciously close to
+				// 0 -- measured to correlate strongly with bad-cell risk --
+				// gets bisected further even past --depth, up to a separate
+				// --tangency-extra-depth budget, exactly mirroring
+				// --repair-rounds' extra-depth philosophy but applied
+				// PROACTIVELY here, before extraction, rather than only after
+				// decompose_ok already failed.
+				bool needs_tangency_refine = tangency_threshold>0.0
+					&& res.min_transversality<tangency_threshold
+					&& c.simplex_level()<max_depth+tangency_extra_depth;
+				if(needs_tangency_refine && c.simplex_level()>=max_depth) ++n_tangency_refined;
+				if(c.simplex_level()<max_depth || needs_tangency_refine) {
 					tree.clear_recent();
 					tree.compat_bisect(c);
 					++nsubdivisions;
@@ -540,6 +567,7 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		cout<<"subdivisions performed: "<<nsubdivisions<<", cells tested: "<<n_cells_tested<<endl;
+		if(tangency_threshold>0.0) cout<<"cells past --depth forced deeper by --tangency-threshold: "<<n_tangency_refined<<endl;
 	}
 	cout<<"final leaf count: "<<tree.leaf_count()<<endl;
 	cout<<"distinct vertices minted: "<<id_cache.next_id()<<" ("<<GLPT_BASE_VERTEX_COUNT<<" base + "

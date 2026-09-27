@@ -90,12 +90,51 @@ static const int GLPT_FACET_SUBFACES[5][4] = {
 	{0,1,3,6}, // facet 4 (excl. vertex 4): {0,1,2},{0,1,3},{0,2,3},{1,2,3}
 };
 
+// --- Transversality score of a single crossing root: w_k := Fa*da_k +
+// Fb*db_k is the ordinary complex directional derivative of F along a
+// 2-face edge (da_k,db_k) (chart-local, from dehomogenizing the face's
+// 3 vertices), since F is holomorphic. The score
+//   |Im(conj(w1)*w2)| / (|e1| |e2| (|Fa|^2+|Fb|^2))
+// is in [0,1] by Cauchy-Schwarz, and is exactly 0 when the 2-face's own
+// (flat) tangent plane is tangent to the curve at this root -- every
+// real direction in it would then have zero directional derivative.
+// Equivalently: the face's two edge vectors are both close to
+// perpendicular to grad(Re F) AND grad(Im F) -- which collapse into
+// this single complex test because grad(Re F) is always perpendicular
+// to grad(Im F), with equal norm (Cauchy-Riemann). Measured
+// (2026-09-27, all 6 catalog curves, depth 14) to predict extraction
+// bad-cell risk with a strong, mostly monotonic gradient: 22% bad rate
+// for score<=0.05, down to ~3% for score in (0.6,0.8] -- see
+// --tangency-threshold in riemann_cp2_glpt.cpp, which uses this to
+// force extra refinement on suspiciously near-tangent cells BEFORE
+// extraction, rather than only repairing bad ones after the fact.
+inline double crossing_transversality(const pt3 face_pts[3], const double bary[3]) {
+	int chart = pick_chart(face_pts);
+	cx a[3], b[3];
+	for(int k=0;k<3;++k) dehomogenize(chart, face_pts[k], a[k], b[k]);
+	cx da1=a[1]-a[0], db1=b[1]-b[0];
+	cx da2=a[2]-a[0], db2=b[2]-b[0];
+	double e1n = std::sqrt(std::norm(da1)+std::norm(db1));
+	double e2n = std::sqrt(std::norm(da2)+std::norm(db2));
+	if(e1n<1e-14 || e2n<1e-14) return 1.0; // degenerate (near-zero-length) edge -- not a tangency signal
+	cx ra = bary[0]*a[0]+bary[1]*a[1]+bary[2]*a[2];
+	cx rb = bary[0]*b[0]+bary[1]*b[1]+bary[2]*b[2];
+	cx Fa = (chart==0)?Fa_chart0(ra,rb):(chart==1)?Fa_chart1(ra,rb):Fa_chart2(ra,rb);
+	cx Fb = (chart==0)?Fb_chart0(ra,rb):(chart==1)?Fb_chart1(ra,rb):Fb_chart2(ra,rb);
+	double gnorm2 = std::norm(Fa)+std::norm(Fb);
+	if(gnorm2<1e-24) return 0.0; // at/near a singular point of the curve -- treat as maximally degenerate
+	cx w1 = Fa*da1 + Fb*db1;
+	cx w2 = Fa*da2 + Fb*db2;
+	return std::abs(std::imag(std::conj(w1)*w2)) / (e1n*e2n*gnorm2);
+}
+
 struct cell_extraction_result {
 	std::vector<crossing_node> nodes;
 	std::vector<std::vector<int> > cycles; // each a closed walk of indices into nodes
 	int ntouching_tets, nbad_tets;
 	bool any_edge;     // false: the curve doesn't cross this cell at all -- not a failure, just nothing to extract
 	bool decompose_ok; // true only when any_edge and the graph cleanly decomposed into cycles
+	double min_transversality; // min crossing_transversality() over every root examined; 1.0 (safe default) if none
 };
 
 //! Builds the crossing-node graph for one glpt 4-cell (its 5 facets'
@@ -111,6 +150,7 @@ inline void extract_cell(const pt3 pts[glpt::DIM+1], const int ids[glpt::DIM+1],
 	out.nodes.clear();
 	out.cycles.clear();
 	out.ntouching_tets=0; out.nbad_tets=0;
+	out.min_transversality=1.0;
 	std::vector<std::vector<int> > adj;
 	bool tet_unhandled=false;
 
@@ -122,6 +162,8 @@ inline void extract_cell(const pt3 pts[glpt::DIM+1], const int ids[glpt::DIM+1],
 			for(int k=0;k<3;++k) { face_pts[k]=pts[GLPT_CELL_FACES[f][k]]; face_ids[k]=ids[GLPT_CELL_FACES[f][k]]; }
 			const face_result& fr = fcache.get(face_pts, face_ids);
 			for(int r=0;r<fr.nroots;++r) {
+				double tv = crossing_transversality(face_pts, fcache.root_bary(fr,r));
+				if(tv<out.min_transversality) out.min_transversality=tv;
 				crossing_node nd;
 				compute_crossing_node(face_ids, fcache.root_bary(fr,r), make_face_key(face_ids[0],face_ids[1],face_ids[2]), r,
 					fcache.root_point(fr,r), nd);

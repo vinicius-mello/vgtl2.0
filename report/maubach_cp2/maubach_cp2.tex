@@ -849,23 +849,81 @@ bad):
   literally a local near-tangency. Cells with at least one such facet
   have a $29.9\%$ bad rate, versus $4.1\%$ for cells with none -- a
   $\sim7\times$ difference.
-\item \textbf{Pairing ambiguity.} The clearest signal: for a facet
-  crossed at $\mathrm{ntn}=4$ of its sub-triangles, the extraction must
-  choose which $2$ of $3$ candidate pairings connect into arcs, by
-  minimum total geodesic length. Taking the ratio of the best pairing's
-  cost to the second-best's ($1.0$ = perfectly tied) and averaging over
-  every cell with at least one such facet: mean $0.42$ (median $0.41$)
-  for cells that still decompose cleanly, versus mean $0.68$ (median
-  $0.80$, 90th percentile $0.9999$) for bad ones. The bad population sits
-  almost exactly where the pairing choice becomes ambiguous -- exactly
-  the local signature of a facet close to tangent to the curve, where the
-  four crossing points approach a symmetric configuration under which
-  every pairing costs nearly the same.
+\item \textbf{Pairing ambiguity.} The clearest \emph{retrospective}
+  signal: for a facet crossed at $\mathrm{ntn}=4$ of its sub-triangles,
+  the extraction must choose which $2$ of $3$ candidate pairings connect
+  into arcs, by minimum total geodesic length. Taking the ratio of the
+  best pairing's cost to the second-best's ($1.0$ = perfectly tied) and
+  averaging over every cell with at least one such facet: mean $0.42$
+  (median $0.41$) for cells that still decompose cleanly, versus mean
+  $0.68$ (median $0.80$, 90th percentile $0.9999$) for bad ones. The bad
+  population sits almost exactly where the pairing choice becomes
+  ambiguous -- exactly the local signature of a facet close to tangent
+  to the curve, where the four crossing points approach a symmetric
+  configuration under which every pairing costs nearly the same.
+\item \textbf{A direct, pointwise transversality score.} The three
+  signals above are all \emph{retrospective}: they need $\mathrm{ntn}\in
+  \{1,4\}$ to already have happened. A single crossing root, on its own,
+  also carries a direct tangency signal. Write a 2-face's two (chart-
+  local, complex) edge vectors as $e_1,e_2$, and the holomorphic gradient
+  of $F$ at the root as $(F_a,F_b)$; since $F$ is holomorphic,
+  $\nabla\mathrm{Re}(F)$ and $\nabla\mathrm{Im}(F)$ are automatically
+  perpendicular and of equal norm (Cauchy--Riemann), so testing whether
+  $e_1,e_2$ are close to perpendicular to \emph{both} collapses into one
+  clean complex test: with $w_k:=F_a\,e_k^a+F_b\,e_k^b$ ($k=1,2$, the
+  ordinary complex directional derivative of $F$ along $e_k$),
+  \[
+    \mathrm{score} \;=\; \frac{|\mathrm{Im}(\overline{w_1}\,w_2)|}
+    {|e_1|\,|e_2|\,(|F_a|^2+|F_b|^2)} \;\in\;[0,1]
+  \]
+  (Cauchy--Schwarz) is exactly $0$ when the 2-face's own flat tangent
+  plane is tangent to the curve at that root (every real direction in it
+  has zero directional derivative), and close to $1$ when maximally
+  transversal. Taking the minimum over every root a cell examines: bad
+  cells skew markedly lower (mean $0.15$, median $0.12$) than good ones
+  (mean $0.24$, median $0.21$), and bucketing by score gives an almost
+  perfectly monotonic gradient in bad-cell rate: $22.0\%$ for
+  score${}\le0.05$, falling to $7.7\%$, $5.6\%$, $3.5\%$, and $2.9\%$
+  across the next four buckets up to score $0.8$ (the topmost bucket,
+  score${}>0.8$, has only $50$ cells and is not statistically
+  meaningful).
 \end{itemize}
 
-These three independent checks agree, and together account for the
+These four independent checks agree, and together account for the
 residual bad-cell population left after continuation and
 \texttt{--repair-rounds}.
+
+\paragraph{Acting on it: \texttt{--tangency-threshold}.} Since the
+transversality score is computable at a single root, cheaply, from data
+\texttt{extract\_cell()} already has on hand, it can be used
+\emph{proactively}, unlike the other three (retrospective) signals:
+\texttt{riemann\_cp2\_glpt.cpp}'s continuation loop now checks a cell's
+own minimum score before accepting it as final at \texttt{--depth}, and
+bisects it further -- up to a separate \texttt{--tangency-extra-depth}
+budget, mirroring \texttt{--repair-rounds}' extra-depth philosophy but
+applied \emph{before} extraction rather than only after it has already
+failed. A concrete comparison (elliptic curve, \texttt{--generic}, depth
+$14$):
+
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+mode & leaves & ok & bad & bad rate \\
+\midrule
+baseline & 327{,}370 & 27{,}397 & 887 & $3.14\%$ \\
+\texttt{--repair-rounds 2} & 327{,}370 & 30{,}605 & 730 & $2.33\%$ \\
+\texttt{--tangency-threshold 0.05} & 612{,}978 & 42{,}278 & 904 & $2.09\%$ \\
+both combined & 612{,}978 & 45{,}709 & 729 & $1.57\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{--tangency-threshold} alone cuts the bad-cell rate by about as
+much as \texttt{--repair-rounds} alone, at a higher mesh-size cost (it
+refines every suspiciously-tangent cell whether or not it would actually
+have failed, unlike repair, which only ever touches cells that already
+did); combining both -- one proactive, one reactive -- is the best result
+measured, roughly halving the baseline rate.
 
 % =====================================================================
 \section{Conclusion}
