@@ -796,6 +796,28 @@ targeted repair rounds -- re-bisecting specifically the cells that failed
 extraction, up to a small extra depth budget, then re-extracting -- brought
 this down to 678 bad cells out of 227\,355 ($0.30\%$).
 
+Re-run at this same depth after \Cref{sec:continuation}'s
+\texttt{--tangency-threshold} was added (\Cref{sec:limitations} below),
+the full progression for this curve/seed is:
+
+\begin{center}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+mode & leaves & ok & bad & bad rate \\
+\midrule
+baseline & 4\,620\,102 & 222\,981 & 1\,348 & $0.601\%$ \\
+\texttt{--repair-rounds 2} alone & 4\,678\,426 & 226\,677 & 678 & $0.298\%$ \\
+\texttt{--tangency-threshold 0.05} alone & 6\,788\,844 & 335\,517 & 1\,260 & $0.374\%$ \\
+both combined & 6\,842\,524 & 339\,147 & \textbf{610} & $\mathbf{0.180\%}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+-- the same complementary pattern already seen at depth 14, holding at
+the deepest depth attempted so far: combining the proactive and reactive
+fix roughly halves whichever one alone achieves, for a new low of
+$0.180\%$.
+
 The bad-cell rate measures \emph{topological} correctness -- whether a
 cell's crossing graph decomposes into simple closed polygons at all -- but
 says nothing about how accurately those polygons' own vertices actually
@@ -816,6 +838,7 @@ own root-finding, inside \texttt{extract\_cell}) is not merely finding
 to essentially full floating-point precision.
 
 \subsection{Limitations}
+\label{sec:limitations}
 
 The algorithm as implemented recovers exactly one connected component of
 the curve; a reducible curve needs one seed per irreducible factor, not
