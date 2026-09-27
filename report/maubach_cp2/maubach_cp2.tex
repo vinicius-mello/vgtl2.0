@@ -828,8 +828,44 @@ true geodesic distances -- but that imbalance turns out \emph{not} to
 correlate with which cells end up bad; if anything, the bad-cell rate
 \emph{falls} as the imbalance of the bisection that created a cell grows.
 Bad cells remain concentrated instead on genuine near-tangencies and
-multiple close crossings on a single facet -- an orthogonal geometric
-phenomenon, not addressed by this report.
+multiple close crossings on a single facet -- confirmed quantitatively,
+not just asserted, by directly instrumenting \texttt{extract\_cell()}
+itself (all six catalog curves, depth 14: 136\,786 touched cells, $8.02\%$
+bad):
+
+\begin{itemize}
+\item \textbf{Direct cause.} $81.6\%$ of bad cells fail on a
+  \emph{degree} mismatch (some crossing-graph node ends up with degree
+  $\ne2$, even though every individual facet's own local crossing count
+  was already one of $\{0,1,2,4\}$); the remaining $18.4\%$ fail on an
+  outright \emph{irregular} facet ($\mathrm{ntn}=3$: three distinct
+  crossing points on a single tetrahedral facet's four triangular
+  2-faces -- always exactly $3$ in this sample, never more, since
+  \texttt{extract\_cell}'s own buffer caps the count at $4$ by
+  construction). No cell failed purely at the final cycle-walk step once
+  its facet counts and degrees were already consistent.
+\item \textbf{Single-facet touching.} A facet with $\mathrm{ntn}=1$ (the
+  curve grazing it at one point, without a clean two-point crossing) is
+  literally a local near-tangency. Cells with at least one such facet
+  have a $29.9\%$ bad rate, versus $4.1\%$ for cells with none -- a
+  $\sim7\times$ difference.
+\item \textbf{Pairing ambiguity.} The clearest signal: for a facet
+  crossed at $\mathrm{ntn}=4$ of its sub-triangles, the extraction must
+  choose which $2$ of $3$ candidate pairings connect into arcs, by
+  minimum total geodesic length. Taking the ratio of the best pairing's
+  cost to the second-best's ($1.0$ = perfectly tied) and averaging over
+  every cell with at least one such facet: mean $0.42$ (median $0.41$)
+  for cells that still decompose cleanly, versus mean $0.68$ (median
+  $0.80$, 90th percentile $0.9999$) for bad ones. The bad population sits
+  almost exactly where the pairing choice becomes ambiguous -- exactly
+  the local signature of a facet close to tangent to the curve, where the
+  four crossing points approach a symmetric configuration under which
+  every pairing costs nearly the same.
+\end{itemize}
+
+These three independent checks agree, and together account for the
+residual bad-cell population left after continuation and
+\texttt{--repair-rounds}.
 
 % =====================================================================
 \section{Conclusion}
