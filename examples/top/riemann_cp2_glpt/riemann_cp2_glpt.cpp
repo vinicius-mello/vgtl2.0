@@ -85,7 +85,15 @@ void alpha_projection(const pt3& p, double out[3]) {
 // across all of its nodes), not per point; that file's own comment
 // documents a real bug (0.69% of polygons, "ribbon spray" artifact)
 // from picking per-point instead, which this avoids by construction.
+// --chart N (flat mode only): force affine chart N (0: X=1, 1: Y=1,
+// 2: Z=1) for every polygon instead of the per-polygon best one --
+// for figures of a curve as a graph over one chart (e.g. w^2=z^3-z in
+// Z=1); combine with --cutoff to drop polygons escaping to infinity.
+int g_forced_chart=-1;
+// --flat-swap: output (Re b, Im b, Re a) instead of (Re a, Im a, Re b).
+bool g_flat_swap=false;
 int pick_chart_polygon(const std::vector<crossing_node>& nodes, const std::vector<int>& cyc) {
+	if(g_forced_chart>=0) return g_forced_chart;
 	int chart=0; double best=-1;
 	for(int c=0;c<3;++c) {
 		double m=1e300;
@@ -102,6 +110,7 @@ int pick_chart_polygon(const std::vector<crossing_node>& nodes, const std::vecto
 // dehomogenize().
 void flat_projection(const pt3& p, int chart, double out[3]) {
 	cx a,b; dehomogenize(chart,p,a,b);
+	if(g_flat_swap) std::swap(a,b);
 	out[0]=a.real(); out[1]=a.imag(); out[2]=b.real();
 }
 
@@ -361,6 +370,159 @@ void cell_points_and_ids(const glpt& c, const vector<pt3>& gp, glpt_edge_cache& 
 	}
 }
 
+// --genus-check: combinatorial Euler characteristic of the extracted
+// complex IN CP^2 -- vertices identified by crossing-node identity
+// (node_key), independent of any projection. Bad cells leave holes;
+// pinched vertices (link with k>1 components) are split into k copies;
+// then, if every hole is a disc, g = sum g_i = (2c - b - chi)/2 with c
+// components and b boundary loops.
+bool g_genus_check=false;
+static int dsu_find(std::vector<int>& p, int x) { while(p[x]!=x) { p[x]=p[p[x]]; x=p[x]; } return x; }
+void genus_check(const std::vector<std::vector<int> >& faces_in, int nverts, int expected_genus) {
+	// corners grouped by link component of their vertex
+	std::vector<std::vector<std::pair<int,int> > > corners(nverts); // (face, pos)
+	for(size_t f=0; f<faces_in.size(); ++f)
+		for(size_t i=0; i<faces_in[f].size(); ++i) corners[faces_in[f][i]].push_back(std::make_pair((int)f,(int)i));
+	std::vector<std::vector<int> > faces(faces_in);
+	int nid=0, pinched=0;
+	for(int v=0; v<nverts; ++v) {
+		const std::vector<std::pair<int,int> >& cs=corners[v];
+		if(cs.empty()) continue;
+		// link vertices of v: union-find over neighbour ids
+		std::map<int,int> li; std::vector<int> par;
+		auto idx=[&](int x){ std::map<int,int>::iterator it=li.find(x); if(it!=li.end()) return it->second; int k=(int)par.size(); li[x]=k; par.push_back(k); return k; };
+		std::vector<int> ca(cs.size());
+		for(size_t j=0;j<cs.size();++j) {
+			const std::vector<int>& F=faces_in[cs[j].first]; int n=(int)F.size(), i=cs[j].second;
+			int a=idx(F[(i+n-1)%n]), b=idx(F[(i+1)%n]);
+			int ra=dsu_find(par,a), rb=dsu_find(par,b); if(ra!=rb) par[ra]=rb;
+			ca[j]=a;
+		}
+		std::map<int,int> comp;
+		for(size_t j=0;j<cs.size();++j) {
+			int r=dsu_find(par,ca[j]);
+			if(!comp.count(r)) { int k=(int)comp.size(); comp[r]=k; }
+		}
+		if(comp.size()>1) ++pinched;
+		for(size_t j=0;j<cs.size();++j) faces[cs[j].first][cs[j].second]=nid+comp[dsu_find(par,ca[j])];
+		nid+=(int)comp.size();
+	}
+	std::map<std::pair<int,int>,int> edges;
+	for(size_t f=0; f<faces.size(); ++f) { int n=(int)faces[f].size();
+		for(int i=0;i<n;++i) { int a=faces[f][i], b=faces[f][(i+1)%n]; edges[std::make_pair(std::min(a,b),std::max(a,b))]++; } }
+	long V=nid, E=(long)edges.size(), F=(long)faces.size(); long chi=V-E+F;
+	std::vector<int> pb(nid), ps(nid);
+	for(int i=0;i<nid;++i) pb[i]=ps[i]=i;
+	std::vector<char> onb(nid,0); long nonman=0;
+	for(auto& e: edges) {
+		if(e.second==1) { onb[e.first.first]=onb[e.first.second]=1;
+			int r1=dsu_find(pb,e.first.first), r2=dsu_find(pb,e.first.second); if(r1!=r2) pb[r1]=r2; }
+		if(e.second>2) ++nonman;
+		int s1=dsu_find(ps,e.first.first), s2=dsu_find(ps,e.first.second); if(s1!=s2) ps[s1]=s2;
+	}
+	std::set<int> loops, comps;
+	for(int i=0;i<nid;++i) { if(onb[i]) loops.insert(dsu_find(pb,i)); comps.insert(dsu_find(ps,i)); }
+	long b=(long)loops.size(), c=(long)comps.size();
+	cout<<endl<<"--- genus check (complex in CP^2, projection-independent) ---"<<endl;
+	cout<<"pinched vertices split: "<<pinched<<", non-manifold edges: "<<nonman<<", components c="<<c<<endl;
+	cout<<"V="<<V<<" E="<<E<<" F="<<F<<" chi="<<chi<<" boundary loops b="<<b<<endl;
+	cout<<"genus estimate (2c-b-chi)/2 = "<<(2.0*c-b-chi)/2.0;
+	if(expected_genus>=0) cout<<"   (expected "<<expected_genus<<" = (n-1)(n-2)/2)";
+	cout<<endl;
+}
+
+
+// --close: topological post-processing of the extracted complex in CP^2.
+// (1) split pinched vertices (one copy per link component); (2) keep the
+// main connected component (tiny islands cut off by the pinches are
+// dropped); (3) cap every boundary loop -- a hole left by bad cells --
+// with a cone from a NEW vertex (a fan from an existing vertex could
+// duplicate an edge), placed at the loop's Fubini-Study barycentre and
+// moved onto the curve by Newton's method in the best affine chart.
+// The result is verified by genus_check() (closed, connected, chi=2-2g).
+bool g_close=false;
+static pt3 newton_onto_curve(pt3 p, bool& ok) {
+	int k=0; for(int i=1;i<3;++i) if(std::abs(p[i])>std::abs(p[k])) k=i;
+	int i1=(k+1)%3, i2=(k+2)%3; if(i1>i2) std::swap(i1,i2);
+	const poly_F3* d[3]={&g_Fx,&g_Fy,&g_Fz};
+	pt3 q=p; for(int t=0;t<3;++t) q[t]=p[t]/p[k];
+	ok=false;
+	for(int it=0; it<30; ++it) {
+		cx f=eval_poly3(g_F,q[0],q[1],q[2]);
+		cx ga=eval_poly3(*d[i1],q[0],q[1],q[2]), gb=eval_poly3(*d[i2],q[0],q[1],q[2]);
+		double n2=std::norm(ga)+std::norm(gb);
+		if(n2<1e-300) break;
+		// minimum-norm Newton step for one complex equation in C^2
+		q[i1]-=f*std::conj(ga)/n2; q[i2]-=f*std::conj(gb)/n2;
+		double nq=hnorm(q);
+		if(std::abs(eval_poly3(g_F,q[0],q[1],q[2]))/std::pow(nq,(double)g_F.d)<1e-13) { ok=true; break; }
+	}
+	return normalize3(q);
+}
+void close_surface(std::vector<pt3>& P, std::vector<std::vector<int> >& faces) {
+	int nv=(int)P.size();
+	// (1) split pinched vertices
+	std::vector<std::vector<std::pair<int,int> > > corners(nv);
+	for(size_t f=0; f<faces.size(); ++f)
+		for(size_t i=0; i<faces[f].size(); ++i) corners[faces[f][i]].push_back(std::make_pair((int)f,(int)i));
+	std::vector<std::vector<int> > nf(faces);
+	std::vector<pt3> NP; int pinched=0;
+	for(int v=0; v<nv; ++v) {
+		const std::vector<std::pair<int,int> >& cs=corners[v];
+		if(cs.empty()) continue;
+		std::map<int,int> li; std::vector<int> par;
+		auto idx=[&](int x){ std::map<int,int>::iterator it=li.find(x); if(it!=li.end()) return it->second; int k=(int)par.size(); li[x]=k; par.push_back(k); return k; };
+		std::vector<int> ca(cs.size());
+		for(size_t j=0;j<cs.size();++j) {
+			const std::vector<int>& F=faces[cs[j].first]; int n=(int)F.size(), i=cs[j].second;
+			int a=idx(F[(i+n-1)%n]), b=idx(F[(i+1)%n]);
+			int ra=dsu_find(par,a), rb=dsu_find(par,b); if(ra!=rb) par[ra]=rb;
+			ca[j]=a;
+		}
+		std::map<int,int> comp;
+		for(size_t j=0;j<cs.size();++j) { int r=dsu_find(par,ca[j]); if(!comp.count(r)) { int k=(int)comp.size(); comp[r]=k; } }
+		if(comp.size()>1) ++pinched;
+		int base=(int)NP.size();
+		for(size_t k=0;k<comp.size();++k) NP.push_back(P[v]);
+		for(size_t j=0;j<cs.size();++j) nf[cs[j].first][cs[j].second]=base+comp[dsu_find(par,ca[j])];
+	}
+	// (2) keep the main component
+	int n2=(int)NP.size();
+	std::vector<int> ps(n2); for(int i=0;i<n2;++i) ps[i]=i;
+	for(auto& f: nf) for(size_t i=1;i<f.size();++i) { int a=dsu_find(ps,f[0]), b=dsu_find(ps,f[i]); if(a!=b) ps[a]=b; }
+	std::map<int,int> csize; for(auto& f: nf) csize[dsu_find(ps,f[0])]+=1;
+	int mainr=-1, best=-1; for(auto& c: csize) if(c.second>best) { best=c.second; mainr=c.first; }
+	std::vector<std::vector<int> > kept; int dropped=0;
+	for(auto& f: nf) { if(dsu_find(ps,f[0])==mainr) kept.push_back(f); else ++dropped; }
+	// (3) cap boundary loops with cones
+	std::map<std::pair<int,int>,int> ec;
+	for(auto& f: kept) for(size_t i=0;i<f.size();++i) { int a=f[i], b=f[(i+1)%f.size()]; ec[std::make_pair(std::min(a,b),std::max(a,b))]++; }
+	std::vector<std::pair<int,int> > bnd;
+	for(auto& f: kept) for(size_t i=0;i<f.size();++i) { int a=f[i], b=f[(i+1)%f.size()]; if(ec[std::make_pair(std::min(a,b),std::max(a,b))]==1) bnd.push_back(std::make_pair(b,a)); }
+	std::vector<int> pb(n2); for(int i=0;i<n2;++i) pb[i]=i;
+	for(auto& e: bnd) { int a=dsu_find(pb,e.first), b=dsu_find(pb,e.second); if(a!=b) pb[a]=b; }
+	std::map<int,std::vector<int> > loopv;
+	for(auto& e: bnd) loopv[dsu_find(pb,e.first)].push_back(e.first);
+	std::map<int,int> centre; int onc=0;
+	for(auto& L: loopv) {
+		pt3 ref=NP[L.second[0]], sum; for(int t=0;t<3;++t) sum[t]=cx(0,0);
+		for(int x: L.second) { pt3 q=align_phase(ref,NP[x]); for(int t=0;t<3;++t) sum[t]+=q[t]; }
+		pt3 c=normalize3(sum);
+		bool ok; pt3 cc=newton_onto_curve(c, ok);
+		double r=0; for(int x: L.second) r=std::max(r,fs_dist(c,NP[x]));
+		if(ok && fs_dist(c,cc)<=2*r+1e-12) { c=cc; ++onc; }
+		centre[L.first]=(int)NP.size(); NP.push_back(c);
+	}
+	for(auto& e: bnd) kept.push_back(std::vector<int>{e.first, e.second, centre[dsu_find(pb,e.first)]});
+	// compact vertex ids
+	std::vector<int> remap(NP.size(),-1); std::vector<pt3> out;
+	for(auto& f: kept) for(int& x: f) { if(remap[x]<0) { remap[x]=(int)out.size(); out.push_back(NP[x]); } x=remap[x]; }
+	P.swap(out); faces.swap(kept);
+	cout<<endl<<"--- close (topological post-processing in CP^2) ---"<<endl;
+	cout<<"pinched vertices split: "<<pinched<<", island faces dropped: "<<dropped
+		<<", holes capped: "<<loopv.size()<<" (cone apex moved onto the curve: "<<onc<<")"<<endl;
+}
+
 int main(int argc, char* argv[]) {
 	int function_idx=0;
 	int max_depth=8;
@@ -389,6 +551,10 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--flat") { alpha_mode=false; }
 		else if(arg=="--alpha-projection") { alpha_mode=true; }
 		else if(arg=="--cutoff" && i+1<argc) { cutoff=atof(argv[++i]); }
+		else if(arg=="--chart" && i+1<argc) { g_forced_chart=atoi(argv[++i]); }
+		else if(arg=="--flat-swap") { g_flat_swap=true; }
+		else if(arg=="--genus-check") { g_genus_check=true; }
+		else if(arg=="--close") { g_close=true; g_genus_check=true; }
 		else if(arg=="--generic") { generic=true; }
 		else if(arg=="--generic-seed" && i+1<argc) { generic=true; generic_seed=(unsigned)atoi(argv[++i]); }
 		else if(arg=="--proximity") { g_proximity=true; }
@@ -403,7 +569,7 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--list") { print_function_catalog_cp2(cout); return 0; }
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
-				<<"[--flat] [--alpha-projection] [--cutoff X] [--generic] [--generic-seed N] [--proximity] "
+				<<"[--flat] [--alpha-projection] [--cutoff X] [--chart N] [--flat-swap] [--genus-check] [--close] [--generic] [--generic-seed N] [--proximity] "
 				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] "
 				<<"[--repair-rounds N] [--repair-extra-depth N] "
 				<<"[--tangency-threshold X] [--tangency-extra-depth N] [--legacy-priority-refine] [--list]"<<endl;
@@ -648,6 +814,11 @@ int main(int argc, char* argv[]) {
 					for(size_t i=0;i<cyc.size();++i) face.push_back(emit(res.nodes[cyc[i]]));
 					faces->push_back(face);
 				} else {
+					if(g_genus_check) { // combinatorial complex in CP^2 (genus check, --close)
+						vector<int> face;
+						for(size_t i=0;i<cyc.size();++i) face.push_back(emit(res.nodes[cyc[i]]));
+						faces->push_back(face);
+					}
 					int chart = pick_chart_polygon(res.nodes, cyc);
 					vector<vec3d> proj(cyc.size());
 					bool clip=false;
@@ -726,6 +897,26 @@ int main(int argc, char* argv[]) {
 	if(g_bernstein) cout<<"Bernstein fallback seeds used: "<<g_bfallback_tried<<" faces tried, "
 		<<g_bfallback_new_root<<" found a root the fixed/dynamic seeds missed"<<endl;
 
+	if(g_genus_check) {
+		int deg=g_F.d;
+		genus_check(faces_out, (int)vert_pts.size(), (deg-1)*(deg-2)/2);
+		if(g_close) {
+			close_surface(vert_pts, faces_out);
+			genus_check(faces_out, (int)vert_pts.size(), (deg-1)*(deg-2)/2);
+			if(!alpha_mode) { // re-project the closed complex (per polygon, as in flat mode)
+				flat_verts.clear(); flat_faces.clear(); nclipped=0;
+				for(auto& f: faces_out) {
+					int chart=g_forced_chart;
+					if(chart<0) { double bestm=-1; for(int c=0;c<3;++c) { double m=1e300; for(int x: f) m=std::min(m,std::abs(vert_pts[x][c])); if(m>bestm) { bestm=m; chart=c; } } }
+					std::vector<int> face; bool clip=false; int base=(int)flat_verts.size();
+					for(int x: f) { double q[3]; flat_projection(vert_pts[x],chart,q); vec3d w; w.v[0]=q[0]; w.v[1]=q[1]; w.v[2]=q[2];
+						if(sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2])>cutoff) clip=true; flat_verts.push_back(w); face.push_back((int)flat_verts.size()-1); }
+					if(clip) { flat_verts.resize(base); ++nclipped; continue; }
+					flat_faces.push_back(face);
+				}
+			}
+		}
+	}
 	// --- Phase 3: output (OBJ mesh) --
 	ofstream out(obj_path.c_str());
 	if(!out) { cerr<<"couldn't open "<<obj_path<<" for writing"<<endl; return 1; }
