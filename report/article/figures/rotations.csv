@@ -1,0 +1,11 @@
+curve,function,depth,seed,ok,bad,genus_est,genus_expected,closed_chi,closed_b,closed_c
+elliptic,5,14,1,42663,429,1,1,0,0,1
+elliptic,5,14,2,47096,911,1,1,0,0,1
+elliptic,5,14,3,43585,634,1,1,0,0,1
+elliptic,5,14,4,44435,647,1,1,0,0,1
+elliptic,5,14,5,46262,807,1,1,0,0,1
+fermat_quartic,3,14,1,53658,3838,3,3,-4,0,1
+fermat_quartic,3,14,2,57415,4459,3,3,-4,0,1
+fermat_quartic,3,14,3,55863,4334,3,3,-4,0,1
+fermat_quartic,3,14,4,59278,3807,3,3,-4,0,1
+fermat_quartic,3,14,5,54799,3911,3,3,-4,0,1

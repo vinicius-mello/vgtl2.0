@@ -43,12 +43,13 @@ arbitrary compatible initial meshes; (ii) pointerless LPT
 codes~\cite{atalaymount2007} and their extension to non-cubical seeds; and
 (iii) the triangulation of Riemann surfaces as codimension-2 loci of $\CP^2$
 as an application. For each strand we list the closest prior work and state
-precisely how our approach compares. Along the way we record one new
-observation, verified computationally: Gaifullin's 15-vertex triangulation
-of $\CP^2$~\cite{gaifullin2009} is \emph{balanced}, i.e.\ properly
-$5$-colorable. Its Maubach compatibility is therefore an instance of the
-classical ``coloring $\Rightarrow$ reflected'' mechanism, not an exception to
-it. Items marked \verify{} were not checked against the original source.
+precisely how our approach compares. Along the way we confirm
+computationally that Gaifullin's 15-vertex triangulation of
+$\CP^2$~\cite{gaifullin2009} is \emph{balanced}, i.e.\ properly
+$5$-colorable, as Gaifullin himself states (with minimality among balanced
+triangulations of $\CP^2$, \cite[\S2]{gaifullin2009}). Its Maubach
+compatibility is therefore an instance of the classical
+``coloring $\Rightarrow$ reflected'' mechanism. Items marked \verify{} were not checked against the original source.
 \end{abstract}
 
 \tableofcontents
@@ -196,10 +197,11 @@ meshes the fair comparison is therefore DGS with $N>n$.
   topology~\cite{joswig2002,ikn2017,venturello2019}. No bridge to NVB seems
   to exist.
 \item \emph{Gaifullin's triangulation is balanced} (\Cref{prop:gaifullin}).
-  We have not found this stated explicitly. Gaifullin's title refers to a
-  ``chess colouring'' of the $4$-simplices, a different property: a
-  bipartite dual graph. \verify{} whether the vertex coloring is mentioned
-  in~\cite{gaifullin2009}.
+  \emph{Correction:} this is stated by Gaifullin himself, who also proves
+  that his triangulation is vertex-minimal among balanced
+  (``regularly vertex-coloured'') triangulations of
+  $\CP^2$~\cite[\S2 and Prop.~2.3]{gaifullin2009}. The novelty is only the
+  connection with Maubach bisection.
 \item \emph{Stellar subdivision schemes as a unifying language.} Mitchell
   (facet) and Maubach (edge) fit the same form. This connects to Alexander's
   and Newman's stellar moves~\cite{lickorish1999}, to Velho's stellar

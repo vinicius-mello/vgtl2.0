@@ -496,13 +496,20 @@ triangulation of $\CP^2$~\cite{gaifullin}, cross-checked against the
 characteristic $3$, and its automorphism group $S_4\times S_3$ acts by
 Fubini--Study isometries in Gaifullin's realization.
 
-\begin{propthm}
+\begin{propthm}[Gaifullin~\cite{gaifullin}]
 Gaifullin's triangulation is balanced. Its colour classes are the natural
 blocks of its vertex set $(V_4\setminus\{e\})\sqcup(\{1,2,3,4\}\times\{1,2,3\})$:
 $V_4\setminus\{e\}$ and $\{a\}\times\{1,2,3\}$ for $a=1,\dots,4$.
-Consequently it is a \emph{vertex-minimal balanced} triangulation of
-$\CP^2$.
+It is a \emph{vertex-minimal balanced} triangulation of $\CP^2$.
 \end{propthm}
+
+Both statements are Gaifullin's own (his \S1 gives the colouring, and his
+\S2 proves minimality in the class of balanced triangulations, using his
+Proposition~2.3: a balanced triangulation with fewer than $3d+3$ vertices
+is a sphere). What is new here is only the consequence for Maubach
+bisection: Gaifullin's triangulation is a strongly compatible seed of
+$\CP^2$ with the fewest possible vertices. We re-verified the colouring
+independently.
 
 \begin{proof}
 Every vertex has degree $12$ in the $1$-skeleton, which has $90$ edges,
@@ -510,10 +517,7 @@ and its two non-neighbours are the other members of its block. Every
 $4$-simplex therefore meets each block exactly once. We checked this
 directly on the facet list. Independently, all $240$ triangles have even
 degree ($180$ of degree $4$ and $60$ of degree $6$), as Traxler's
-criterion requires. For minimality: $\CP^2$ is orientable, so by the
-lemma every balanced triangulation of $\CP^2$ admits a chess colouring.
-Gaifullin proves that his triangulation is vertex-minimal among
-triangulations of $\CP^2$ admitting a chess colouring.
+criterion requires. For minimality, see~\cite[\S2]{gaifullin}.
 \end{proof}
 
 The local vertex order used by the implementation for the $108$ cells
