@@ -1,0 +1,449 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{cleveref}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+\newtheorem*{defthm}{Definition}
+\newtheorem*{thmthm}{Theorem}
+\newtheorem{proposition}{Proposition}
+\crefname{proposition}{Proposition}{Propositions}
+\newtheorem*{remthm}{Remark}
+
+\newcommand{\CP}{\mathbb{CP}}
+\newcommand{\type}{\mathrm{type}}
+\newcommand{\level}{\mathrm{level}}
+\newcommand{\verify}{\textcolor{red!70!black}{\textsf{[verify]}}}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+\title{\bf Maubach Subdivision on $\CP^2$\\[4pt]\large Related Work}
+\author{Vinicius Mello}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document surveys the literature related to a planned article built on
+the technical report \emph{Maubach Subdivision on $\CP^2$}. The article has
+three strands: (i) the combinatorial description of Maubach's subdivision as
+a \emph{stellar subdivision scheme}~\cite{mello2006} and its adaptation to
+arbitrary compatible initial meshes; (ii) pointerless LPT
+codes~\cite{atalaymount2007} and their extension to non-cubical seeds; and
+(iii) the triangulation of Riemann surfaces as codimension-2 loci of $\CP^2$
+as an application. For each strand we list the closest prior work and state
+precisely how our approach compares. Along the way we record one new
+observation, verified computationally: Gaifullin's 15-vertex triangulation
+of $\CP^2$~\cite{gaifullin2009} is \emph{balanced}, i.e.\ properly
+$5$-colorable. Its Maubach compatibility is therefore an instance of the
+classical ``coloring $\Rightarrow$ reflected'' mechanism, not an exception to
+it. Items marked \verify{} were not checked against the original source.
+\end{abstract}
+
+\tableofcontents
+
+% =====================================================================
+\section{Summary and positioning}
+% =====================================================================
+
+\begin{enumerate}[leftmargin=*,itemsep=4pt]
+\item \textbf{The direct competitor is Diening, Gehring and Storn
+  (DGS)~\cite{dgs2025}.} They initialize Maubach's routine on \emph{any}
+  conforming triangulation in any dimension by a proper $(N{+}1)$-coloring
+  of the vertices, $N\ge n$. The coloring is computed greedily in linear
+  time, with $N$ bounded by the maximal vertex degree. For $N=n$ the coloring
+  is exactly the ``global flag/rank'' mechanism behind Theorems 9 and 10 of
+  the thesis. For $N>n$ each $n$-simplex is treated as a face of a virtual
+  $N$-simplex. The article must position itself explicitly with respect to
+  DGS.
+
+\item \textbf{Gaifullin's $\CP^2$ is balanced}
+  (\Cref{prop:gaifullin}). The Maubach ordering found by the search of the
+  report is precisely a proper $5$-coloring of the vertices. This contradicts
+  the report's statement that the mesh has no global rank. What is true is
+  that the rank is not given \emph{by construction}. This yields a clean
+  statement for the article: balanced $\Rightarrow$ Maubach-compatible with
+  $i=j$ on every shared facet~\cite{traxler1997,dgs2025}.
+
+\item \textbf{Kühnel's $\CP^2_9$ cannot be balanced.} It is
+  $3$-neighborly, so its $1$-skeleton is $K_9$ and needs $9$ colors. In DGS
+  terms it is the case $N=8>n=4$.
+
+\item \textbf{Theorems 9 and 10 of the thesis are not new as facts.}
+  Products of simplices and barycentric subdivisions are the textbook
+  balanced complexes, and ``balanced $\Rightarrow$ reflected'' is already in
+  Traxler~\cite{traxler1997}. The pre-refinement of
+  Kossaczký~\cite{kossaczky1994} and Stevenson~\cite[App.~A]{stevenson2008}
+  is essentially the barycentric subdivision without the edge-midpoint
+  level, with $(n{+}1)!/2$ cells instead of $(n{+}1)!$. What belongs to the
+  thesis is the \emph{formalism}:
+  \begin{itemize}[itemsep=0pt]
+  \item a scheme is an invariant plus an algorithm;
+  \item the invariant is proved inductively, level by level (Lemmas 5--7,
+    Theorem 8);
+  \item Mitchell's facet-based and Maubach's edge-based schemes are unified
+    in one stellar language.
+  \end{itemize}
+
+\item \textbf{The LPT strand has strong analogues but no equivalent.}
+  Existing work includes t8code/TM-index~\cite{bursteddeholke2016},
+  concurrent binary trees~\cite{dupuy2020}, diamond
+  hierarchies~\cite{weissdefloriani2011} and permutahedral
+  encodings~\cite{bkw2023}. None of them combines conforming bisection,
+  arbitrary dimension, a non-cubical seed and no pointers.
+
+\item \textbf{The application occupies a real gap.} We triangulate the curve
+  \emph{intrinsically in $\CP^2$}: compact, with no charts, no branch cuts
+  and no special treatment of points at infinity. We do this by
+  combinatorial continuation over a Maubach-refined mesh of $\CP^2$ itself.
+  The weakness to state openly is that the output is \emph{not}
+  topologically certified.
+\end{enumerate}
+
+% =====================================================================
+\section{Bisection refinement: newest vertex and Maubach}
+\label{sec:bisection}
+% =====================================================================
+
+\subsection{The classical lineage}
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.6cm}LL@{}}
+\toprule
+Work & Contribution & Requirement on the initial mesh \\
+\midrule
+Rivara~\cite{rivara1984,rivara1991} & Longest-edge bisection (2D/3D/$n$D) & None combinatorial; the choice is geometric \\
+Mitchell~\cite{mitchell1988,mitchell1991} & Newest vertex bisection (NVB), 2D & Compatible refinement edges; always exist in 2D~\cite{bdd2004} \\
+Bänsch~\cite{bansch1991}, Kossaczký~\cite{kossaczky1994} & NVB in 3D & Kossaczký pre-refines the initial mesh \\
+\textbf{Maubach}~\cite{maubach1995} & $n$D NVB: bisect $[v_0,v_\gamma]$, cyclic tag & Grids ``generated by reflection'' \\
+\textbf{Traxler}~\cite{traxler1997} & Equivalent formulation & Reflected partition. For simply connected domains: exists iff every interior $(n{-}2)$-face lies in an even number of simplices \\
+Arnold--Mukherjee--Pouly~\cite{amp2000} & Marked tetrahedral bisection (5 types) & Any 3D mesh, but only uniform refinements of level $\equiv 0 \pmod n$ are conforming \\
+\textbf{Stevenson}~\cite{stevenson2008} & Closure estimate in $n$D & Matching-neighbour condition (b), weaker than Traxler's. Open whether every 3D mesh satisfies it. App.~A: pre-refinement into $\tfrac12(n{+}1)!$ simplices always does \\
+Alkämper--Gaspoz--Klöfkorn~\cite{agk2018} & Weak compatibility: $O(n)$ renumbering of any mesh. Termination, not optimal closure & Any \\
+Belda-Ferrín et al.~\cite{belda2018,belda2022,belda2023} & $n$ marked bisection stages, then ``cast'' to reflected simplices and switch to Maubach & Any conforming mesh \\
+\textbf{Diening--Gehring--Storn}~\cite{dgs2025} & Initialization by $(N{+}1)$-coloring; greedy, $O(\#\text{vertices})$; shape regularity and BDV closure & Any. $N=n$ is Traxler's condition \\
+Diening--Storn--Tscherpel~\cite{dst2023} & Optimal grading; vertex generation from colors & $(n{+}1)$-colored \\
+Gehring~\cite{gehring2023} & Constant in the BDV--Stevenson theorem & -- \\
+Li~\cite{li2026} & First unconditional closure estimate for AMP/Bänsch & Any (3D) \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Belda-Ferrín et al.\ state that, for $n>3$, ``there is not any known method to
+extract a reflection structure from an arbitrary unstructured conformal
+mesh''~\cite{belda2023}. DGS~\cite{dgs2025} closes this gap by coloring,
+without extracting a reflection structure. Their Remark~9 notes that $(n{+}1)$-colorings do not always
+exist. Their Section~3.2 therefore allows $N>n$ colors: each simplex is
+embedded as a face of a virtual $N$-simplex, and the bisection vertex
+generations are propagated accordingly. Their Theorem~10 shows that the
+resulting routine coincides with Maubach's original one under the ordering
+of their Definition~2.
+
+\subsection{Where the thesis fits}
+
+\paragraph{Definition 9 versus Stevenson's condition (b).}
+(MaubachA) allows two same-level neighbours to have either $i=j$ or
+$\{i,j\}=\{0,\type\}$. In Maubach's convention (bisection edge $[0,\type]$)
+this is the analogue of Stevenson's use of
+\[
+T_R=(x_n,x_1,\dots,x_\gamma,x_{n-1},\dots,x_{\gamma+1},x_0)_\gamma ,
+\]
+the tagged simplex with the same children as $T$, in Traxler's convention
+(bisection edge $x_0x_n$). There, $T$ and $T'$ are \emph{reflected
+neighbours} if the vertex sequence of $T$ or of $T_R$ agrees with that of
+$T'$ in all but one position~\cite[\S4]{stevenson2008}.
+\verify{} the exact equivalence after translating conventions.
+
+The structural difference is this. The thesis states an invariant that holds
+at \emph{every} level and proves that the algorithm preserves it (Lemma 7,
+Theorem 8). Stevenson and Traxler impose their condition on the initial mesh
+only, and then prove that all uniform refinements are conforming (Stevenson's
+Theorem 4.3). Both routes prove essentially the same theorem; the thesis's
+proof is local, inductive and purely combinatorial. Stevenson's Remark~4.4
+shows that condition (b) is also \emph{necessary}. Definition 9 can thus be
+presented as a hereditary form of the weakest possible level-0 condition.
+
+\paragraph{Theorems 9 and 10.}
+Both constructions are balanced complexes in Stanley's sense. For a product
+of simplices, the lattice rank $|L|$ is an $(n{+}1)$-coloring; for a
+barycentric subdivision, the dimension of the flag element is. ``Balanced
+$\Rightarrow$ reflected with $i=j$'' is Traxler's condition, restated as a
+coloring in DGS~\S3.1. The thesis (2006) predates Stevenson (2008) but not
+Traxler (1997), so priority on the general fact cannot be claimed.
+Theorems 9 and 10 are best presented as instances with short proofs in the
+stellar formalism. Stevenson's pre-refinement costs half as many cells as
+the barycentric one, and DGS show that neither is needed. For non-balanced
+meshes the fair comparison is therefore DGS with $N>n$.
+
+\paragraph{Where there is room for a genuine contribution.}
+\begin{enumerate}[itemsep=2pt]
+\item \emph{Closed manifolds as seeds.} All work cited above concerns domains
+  in $\mathbb R^n$, for finite elements. Triangulations of closed manifolds
+  ($\CP^2$, $S^2\times S^2$) and the question of which minimal
+  triangulations are balanced belong to combinatorial
+  topology~\cite{joswig2002,ikn2017,venturello2019}. No bridge to NVB seems
+  to exist.
+\item \emph{Gaifullin's triangulation is balanced} (\Cref{prop:gaifullin}).
+  We have not found this stated explicitly. Gaifullin's title refers to a
+  ``chess colouring'' of the $4$-simplices, a different property: a
+  bipartite dual graph. \verify{} whether the vertex coloring is mentioned
+  in~\cite{gaifullin2009}.
+\item \emph{Stellar subdivision schemes as a unifying language.} Mitchell
+  (facet) and Maubach (edge) fit the same form. This connects to Alexander's
+  and Newman's stellar moves~\cite{lickorish1999}, to Velho's stellar
+  grammars~\cite{velho2003} and $4$--$8$ meshes~\cite{velhozorin2001}
+  (which are NVB in 2D), and to balanced cross-flips~\cite{ikn2017}, the
+  balanced analogue of Pachner moves.
+\end{enumerate}
+
+\subsection{Colorability criteria}
+\label{sec:colorability}
+
+Joswig~\cite{joswig2002} shows that a locally strongly connected simplicial
+complex is balanced if and only if its group of projectivities is trivial.
+For simply connected manifolds this reduces to Traxler's criterion: every
+$(n{-}2)$-face has even degree. Two elementary facts suffice for the $\CP^2$
+seeds:
+\begin{itemize}[itemsep=1pt]
+\item a $k$-neighborly complex with $k\ge 2$ and more than $n+1$ vertices is
+  never balanced, since adjacent vertices need distinct colors;
+\item $\CP^2$ is simply connected, so it suffices to check that every
+  triangle lies in an even number of $4$-simplices.
+\end{itemize}
+
+\begin{proposition}
+\label[proposition]{prop:gaifullin}
+Gaifullin's $15$-vertex, $108$-cell triangulation of $\CP^2$ is balanced.
+Explicitly, its vertices split into five classes of three mutually
+non-adjacent vertices. The complement of the $1$-skeleton is a disjoint
+union of five triangles, and every vertex has degree $12$. In the ordering
+used by \texttt{riemann\_cp2}, the position of each vertex is the same in
+every cell containing it. Hence all $270$ interior facets satisfy
+$\partial_i\sigma=\partial_j\omega\Rightarrow i=j$. Moreover, each of the
+$240$ triangles lies in $4$ ($180$ triangles) or $6$ ($60$ triangles)
+cells, and the dual graph is bipartite. Kühnel's $\CP^2_9$ is not balanced.
+\end{proposition}
+
+\begin{proof}[Verification]
+Direct computation on the facet list \texttt{gaifullin\_cells\_raw} in
+\nolinkurl{examples/top/riemann_cp2/riemann_cp2.cpp}:
+\begin{itemize}[itemsep=1pt]
+\item exhaustive backtracking finds a proper 5-coloring;
+\item the per-vertex set of positions is a singleton for all 15 vertices;
+\item the facet-index pairs are $(k,k)$, $54$ times for each
+  $k=0,\dots,4$;
+\item triangle degrees were counted directly.
+\end{itemize}
+For Kühnel's $\CP^2_9$, $3$-neighborliness gives a $K_9$ skeleton.
+\end{proof}
+
+\begin{remthm}
+Gaifullin also shows that the automorphism group $S_4\times S_3$ acts by
+Fubini--Study isometries~\cite{gaifullin2009}. This explains the measured
+max/min Fubini--Study edge ratio of exactly $1.4636$ with zero variance
+across all 108 cells. The same paper gives a 33-vertex subdivision on which
+the moment map is simplicial, a candidate seed worth testing.
+\end{remthm}
+
+% =====================================================================
+\section{Pointerless representations and neighbour finding}
+\label{sec:lpt}
+% =====================================================================
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}>{\raggedright\arraybackslash}p{3.4cm}L>{\raggedright\arraybackslash}p{2.1cm}p{1.3cm}p{0.9cm}@{}}
+\toprule
+Work & Hierarchy / idea & Seed & Conf. & Dim. \\
+\midrule
+Hebert~\cite{hebert1994} & Symbolic tetrahedral bisection & Cube & yes & 3 \\
+Maubach~\cite{maubach1996} & Neighbour location in $n$D Maubach grids & Kuhn & yes & $n$ \\
+Evans--Kirkpatrick--Townsend~\cite{ekt2001} & Right-triangulated irregular networks: binary label $\Rightarrow$ geometry & Square & yes & 2 \\
+Lee--De Floriani--Samet~\cite{ldfs2001} & Constant-time neighbours for bisection tetrahedra & Cube (6 tets) & yes & 3 \\
+\textbf{Atalay--Mount}~\cite{atalaymount2007} & \textbf{LPT codes}: geometry and neighbours by table lookup & Kuhn cube ($\mathrm{Sym}(n)$ orbit) & yes & $n$ \\
+Weiss--De Floriani~\cite{weissdefloriani2011} & Diamond hierarchies (diamond = star of the bisection edge) & Kuhn & yes & $n$ \\
+\textbf{Burstedde--Holke}~\cite{bursteddeholke2016}, t8code & TM-index (Morton SFC for Bey red refinement); \emph{forest} over an arbitrary coarse mesh & \textbf{Any} & no & 2, 3 \\
+Burstedde--Wilcox--Ghattas~\cite{p4est2011} & Forest of octrees & Any (hex) & no & 2, 3 \\
+Dupuy~\cite{dupuy2020} & Concurrent binary trees: implicit heap of bits; longest-edge bisection on GPU & 2D & yes & 2 \\
+Boissonnat--Kachanovich--Wintraecken~\cite{bkw2023} & Permutahedral encoding of Freudenthal--Kuhn/Coxeter simplices & $\mathbb R^d$ (uniform) & yes & $d$ \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\paragraph{Positioning of \texttt{glpt}.}
+\begin{itemize}[leftmargin=*,itemsep=3pt]
+\item \emph{Against Atalay--Mount.} Their same-orthant neighbour formula
+  relies on the seed being a single $\mathrm{Sym}(n)$ orbit. A \emph{balanced}
+  seed suffices. Ordering the vertices of each seed cell by color identifies
+  it affinely with the Kuhn reference simplex. The LPT code inside a seed is
+  then unchanged, and crossing a seed boundary preserves the local facet
+  index ($i=j$). Such crossings are resolved by a seed adjacency table,
+  $108\times5$ for Gaifullin. This explains \emph{why} the adaptation is
+  easy. It is less easy in two cases:
+  \begin{itemize}[itemsep=0pt]
+  \item seeds compatible only through the $\{0,\type\}$ exception would need
+    a permutation correction at crossings;
+  \item DGS seeds with $N>n$ would need codes of a virtual $N$-simplex, and
+    DGS's Remark~12 warns that restricting refinements of the virtual
+    $N$-simplex does \emph{not} reproduce their refinement.
+  \end{itemize}
+  Both are future work.
+\item \emph{Against t8code.} The architecture is the same (tree id
+  $\approx$ \texttt{seed\_index}, per-tree linear code, inter-tree
+  connectivity table). Ours uses \emph{conforming}, graded bisection
+  without hanging nodes, in arbitrary dimension (4 here).
+\item \emph{Against BKW.} They encode a uniform triangulation; \texttt{glpt}
+  encodes an adaptive hierarchy.
+\item \emph{Limitations to state.} The \texttt{DEEP\_CROSSING} case
+  (neighbour refined deeper than the query) is not implemented. Storage is
+  $O(\#\text{leaves})$ in a hash table.
+\end{itemize}
+
+% =====================================================================
+\section{Application: triangulating Riemann surfaces}
+\label{sec:riemann}
+% =====================================================================
+
+\subsection{Numerical computation of Riemann surfaces}
+Deconinck and van Hoeij's Maple package \texttt{algcurves}~\cite{deconinckvanhoeij2001}
+computes monodromy and period matrices of plane algebraic curves. Other
+tools in the same vein include Frauendiener--Klein's Matlab codes, Sage's
+\texttt{RiemannSurface} (Bruin--Sijsling--Zotine), and Kranich's certified
+homotopy continuation of plane curves~\cite{kranich2016}. See
+Bobenko--Klein~\cite{bobenkoklein2013} for an overview. These methods treat
+the surface as a branched cover of $\CP^1$ and compute analytic invariants.
+We construct a \emph{simplicial complex} of the curve in $\CP^2$, which is
+complementary: our mesh can, for instance, confirm the genus through
+$\chi=2-2g$.
+
+\subsection{Visualization}
+Hanson~\cite{hanson1994} renders Fermat curves in $\CP^2$ projected to
+$\mathbb R^3$, using parametrizations and symmetry.
+Nieser--Poelke--Polthier~\cite{nieser2010} build meshes as multivalued
+graphs over $\mathbb C$ from branch points, with cuts. Kranich renders
+domain-coloured Riemann surfaces on the GPU~\cite{kranich2016}. All of these
+work through a projection to $\mathbb C$, with charts or cuts. Our
+construction is intrinsic in $\CP^2$; the price is the chart-consistency
+problem at visualization time.
+
+\subsection{Implicit manifolds of codimension greater than one}
+\begin{itemize}[leftmargin=*,itemsep=3pt]
+\item \textbf{PL continuation.} Allgower--Schmidt~\cite{allgowerschmidt1985}
+  approximate implicit manifolds of arbitrary codimension over
+  Freudenthal--Kuhn triangulations. The textbook treatment of simplicial
+  continuation is Allgower--Georg~\cite{allgowergeorg2003}. This is the
+  historical lineage of our ``continuation + Kuhn''.
+\item \textbf{Weigle--Banks}~\cite{weiglebanks1996}, complex-valued contour
+  meshing, treat the zero set of $f:\mathbb C^2\to\mathbb C$ as a surface in
+  $\mathbb R^4$, extracted simplicially on a grid. This is the most direct
+  predecessor of our codimension-2 extraction, but it works on a uniform
+  affine grid of $\mathbb R^4$, not on $\CP^2$.
+\item Bhaniramka--Wenger--Crawfis~\cite{bwc2004} construct isosurfaces in
+  any dimension, in codimension 1.
+\item Castelo et al.~\cite{castelo2006}, the J1a triangulation: adaptive,
+  any dimension, for implicit manifolds. This is the Brazilian lineage
+  of~\cite{gomestavares1989} and a natural competitor on $n$D adaptivity.
+\item \textbf{Boissonnat--Kachanovich--Wintraecken}~\cite{bkw2023} trace
+  isomanifolds from a seed point by cell-to-cell continuation over
+  Freudenthal--Kuhn/Coxeter triangulations, polynomially in $d$ and with
+  guarantees; see also~\cite{boissonnatwintraecken2022} for topological
+  correctness. This is a mandatory reference: same strategy, uniform
+  triangulation, certified. Ours is adaptive and lives in $\CP^2$, but is
+  not certified.
+\item Ju et al.~\cite{ju2024} build adaptive simplicial grids for implicit
+  complexes, including curve networks (codimension 2 in $\mathbb R^3$),
+  starting from a 6-tetrahedron cube. \verify{} their exact bisection rule
+  and refinement criterion.
+\item Gerstner--Rumpf~\cite{gerstnerrumpf2000} and
+  Pascucci~\cite{pascucci2002} extract isosurfaces on bisection
+  hierarchies. The combination ``Maubach hierarchy + extraction'' is thus
+  established in visualization, but only in codimension 1 and in
+  $\mathbb R^3$.
+\end{itemize}
+
+\subsection{Certification}
+Plantinga--Vegter~\cite{plantingavegter2004} guarantee isotopy via interval
+arithmetic on quadtrees/octrees. Mourrain--Pavone~\cite{mourrainpavone2009}
+subdivide in the Bernstein basis. Reuter et al.~\cite{reuter2008} use the
+\emph{barycentric} Bernstein basis on simplices, the exact counterpart of
+our \texttt{--bernstein} enclosure on 2-faces. Bertini\_real~\cite{bertinireal2017}
+computes numerical cell decompositions of real curves and surfaces; a
+complex curve is a real surface in $\mathbb R^4$ (\verify{} whether it
+handles this case). Our method is heuristic and adaptive.
+\texttt{--tangency-threshold} and \texttt{--repair-rounds} reduce the
+bad-cell rate (best: $0.180\%$) but do not eliminate it. It should be
+presented as a practical triangulation, checkable a posteriori via
+$\chi=2-2g$, not as a certified one.
+
+% =====================================================================
+\section{Triangulations of $\CP^2$}
+% =====================================================================
+
+\begin{itemize}[leftmargin=*,itemsep=3pt]
+\item Kühnel--Banchoff~\cite{kuhnelbanchoff1983}: $\CP^2_9$, the unique
+  9-vertex triangulation. It is $3$-neighborly, hence not balanced.
+\item \textbf{Gaifullin}~\cite{gaifullin2009}: 15 vertices, automorphism
+  group $S_4\times S_3$ acting by Fubini--Study isometries; minimal among
+  triangulations admitting a chess colouring. Balanced by
+  \Cref{prop:gaifullin}. Note: the technical report cites arXiv:0904.4222
+  with an incorrect title; the correct title is the one given in the
+  bibliography.
+\item Schwartz~\cite{schwartz2023}: trisection of $\CP^2_9$.
+\item Tools used for verification: GAP with simpcomp~\cite{simpcomp}.
+\end{itemize}
+
+% =====================================================================
+\section{Suggestions for the article}
+% =====================================================================
+
+\begin{enumerate}[leftmargin=*,itemsep=3pt]
+\item \textbf{Central statement.} ``Maubach bisection works verbatim on any
+  balanced initial triangulation, including triangulations of closed
+  manifolds; pointerless LPT codes extend to such seeds by adding a seed
+  index and a seed adjacency table.'' The first half is known~\cite{traxler1997,dgs2025}.
+  The contributions are:
+  \begin{itemize}[itemsep=0pt]
+  \item the star-scheme formalism with a hereditary invariant;
+  \item closed-manifold seeds (Gaifullin's balanced $\CP^2$);
+  \item the LPT extension;
+  \item the application.
+  \end{itemize}
+\item \textbf{Comparison experiments.}
+  \begin{itemize}[itemsep=0pt]
+  \item Kühnel with DGS initialization ($N=8$) against Gaifullin ($N=4$):
+    cells, Fubini--Study quality, bad-cell rate. This would be the first use
+    of DGS outside $\mathbb R^n$.
+  \item Barycentric subdivision of Kühnel against Stevenson's
+    pre-refinement of Kühnel against Gaifullin: cell cost and quality.
+  \item A Weigle--Banks style extraction on an affine chart grid against
+    intrinsic $\CP^2$ on the same curve: cells visited and artifacts near
+    infinity.
+  \end{itemize}
+\item \textbf{Corrections to the report} before reusing text:
+  \begin{itemize}[itemsep=0pt]
+  \item Gaifullin \emph{has} a global rank structure (a coloring);
+  \item fix the title of the Gaifullin reference;
+  \item reinterpret the report's ``coloring problem on the dual graph'' as a
+    search for a proper $(n{+}1)$-coloring of the vertices.
+  \end{itemize}
+\item \textbf{Open questions.} What is the minimal number of vertices of a
+  balanced triangulation of $\CP^2$? Does Gaifullin's 33-vertex subdivision
+  (simplicial moment map) give a better seed?
+\end{enumerate}
+
+\bibliographystyle{plain}
+\bibliography{related_work}
+
+\end{document}
