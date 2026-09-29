@@ -324,6 +324,27 @@ constructions are:
 \label{sec:stellar}
 % =====================================================================
 
+Adaptive refinement has two sides. One is geometric: where to put the new
+vertices and how cell shapes evolve. The other is combinatorial: which
+simplex to split next, and which additional splits keep the mesh
+conforming. Most bisection methods mix the two, for example by choosing
+the longest edge. Newest-vertex bisection is attractive precisely
+because its decisions can be made from combinatorial data alone. That
+is what makes it usable on meshes whose geometry is unusual, such as a
+triangulation of $\CP^2$ realized with Fubini--Study geodesics, where
+``longest edge'' has no convenient meaning. The goal of this section is
+to isolate that combinatorial layer.
+
+We work with \emph{ordered} simplicial complexes, in which the vertex
+order of every simplex is part of the data. Refinement becomes a
+sequence of \emph{ordered stellar subdivisions}. A refinement
+\emph{scheme} is then specified by an invariant, a property of the order
+and of the hierarchy levels, together with an algorithm that preserves
+it. Correctness proofs reduce to checking, locally, how a single stellar
+operation affects pairs of adjacent cells. The Mitchell and Maubach
+schemes differ only in their invariants. The same three lemmas, and the
+same induction on the hierarchy level, prove both.
+
 \subsection{Ordered simplicial complexes and conforming meshes}
 
 \begin{definition}
@@ -463,6 +484,20 @@ Maubach versions in full below. The Mitchell versions are simpler.
 \section{Maubach's scheme}
 \label{sec:maubach}
 % =====================================================================
+
+In dimension $2$ a facet is an edge, and Mitchell's scheme is exactly
+newest-vertex bisection. In higher dimensions, however, splitting
+facets gives no control over the shape of the cells. Maubach's scheme
+instead splits an edge. On
+Kuhn's triangulation of the cube it reproduces longest-edge bisection
+and produces only finitely many similarity classes. The question for this
+section is what Maubach's rule looks like as a stellar subdivision
+scheme: which combinatorial invariant on an ordered mesh guarantees
+that the edge chosen by one cell is also the edge chosen by every
+neighbor sharing it. Answering it gives a proof of conformity that
+refers only to the vertex order and the levels, and so applies
+unchanged to any mesh satisfying the invariant, whatever its geometry.
+
 
 Maubach's scheme splits an \emph{edge}. For an $m$-dimensional mesh set
 \[
@@ -669,6 +704,25 @@ midpoints instead, and the combinatorics is unaffected.
 \section{Initial meshes: strong compatibility is balance}
 \label{sec:initial}
 % =====================================================================
+
+\Cref{thm:maubach} moves the whole difficulty to the initial mesh: once
+the Maubach invariants hold at level $0$, refinement takes care of
+itself. For a product of simplices, such as Kuhn's cube, they hold by
+construction. In general they do not, and this is the classical obstacle
+to newest-vertex bisection in dimension $n\ge3$. Our application raises
+the question in a setting the finite-element literature does not
+consider: the seed is a triangulation of a closed $4$-manifold, $\CP^2$,
+rather than of a domain in $\R^n$. Which triangulations of $\CP^2$ can
+serve as seeds, and how can we recognize them?
+
+This section shows that the strong form of the invariant is a familiar
+combinatorial property in disguise: the mesh must be \emph{balanced},
+i.e.\ its vertices must admit a proper coloring by $n+1$ colors. This
+reduces the question to graph coloring and connects it with the
+literature on balanced manifolds. It also explains the classical
+constructions uniformly, and it singles out Gaifullin's triangulation
+of $\CP^2$ as a natural seed.
+
 
 \subsection{The equivalence}
 

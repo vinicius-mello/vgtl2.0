@@ -31,6 +31,8 @@
 \newcommand{\link}{\mathrm{link}}
 \newcommand{\weld}{\mathrm{weld}}
 \newcommand{\st}{\mathrm{st}}
+\newcommand{\col}{\mathfrak{c}}
+\setlength{\emergencystretch}{3em}
 
 \lstdefinestyle{cpp}{
   language=C++,
@@ -67,8 +69,9 @@ verifies the thesis's Lemmas 5--7 (finding and correcting a symbol lost in
 the source PDF's text layer along the way), and then shows, with a working
 implementation, that the same criterion extends well beyond those two
 cases: to meshes in dimension greater than the classical $\le 3$ setting,
-and to a triangulation with no group-orbit or flag structure at all,
-verified compatible purely by an offline combinatorial search. The
+and to a triangulation of a closed $4$-manifold with no group-orbit
+structure. Its compatibility turns out to be a vertex colouring:
+strong compatibility is equivalent to the mesh being balanced. The
 application used throughout is the adaptive triangulation of a smooth
 algebraic curve $F(X,Y,Z)=0$ -- a Riemann surface -- realized as a
 codimension-2 locus inside the complex projective plane $\CP^2$ (a real
@@ -120,7 +123,8 @@ identified Riemann spheres but directly as a codimension-2 real
 submanifold of $\CP^2$ -- a genuinely 4-dimensional real ambient space,
 triangulated by A.~Gaifullin's 15-vertex, 108-cell minimal-vertex
 triangulation of $\CP^2$~\cite{gaifullin}, a mesh with no product structure
-and no flag/rank structure inherited by construction.
+and no flag/rank structure inherited by construction -- although, as
+\Cref{sec:gaifullin} shows, it does carry one: it is balanced.
 
 The report is organized as follows. \Cref{sec:maubach} recapitulates the
 relevant part of Chapter 4 -- star subdivisions, the Maubach invariants,
@@ -129,10 +133,11 @@ includes one genuine correction: the PDF's text layer silently drops the
 comparison symbols in Lemma 5's statement; \Cref{sec:lemma5} reconstructs
 and confirms the correct direction both from the proof and from the
 original page image). \Cref{sec:gaifullin} shows how Gaifullin's
-triangulation is made Maubach-compatible: not via a global rank, but by
-reformulating Definition 9 as a graph-coloring search on the mesh's dual
-graph, solved once, offline, by exact backtracking, and cross-checked
-against GAP's~\cite{gap} \texttt{simpcomp}~\cite{simpcomp} package. \Cref{sec:lpt} describes the
+triangulation is Maubach-compatible. On a conforming mesh, strong
+compatibility is equivalent to the mesh being \emph{balanced}, i.e.\
+properly vertex-colourable with $n+1$ colours, and Gaifullin's
+triangulation is balanced. Its combinatorics were cross-checked against
+GAP's~\cite{gap} \texttt{simpcomp}~\cite{simpcomp} package. \Cref{sec:lpt} describes the
 economical, pointerless cell representation this project built on top of
 that mesh -- an extension of Atalay \& Mount's LPT
 codes~\cite{atalaymount} -- with particular attention to what changes in
@@ -274,7 +279,8 @@ gives
   c_1\omega=\langle v_1,\dots,v_l,v,v_{l+1},\dots,v_m\rangle,
 \]
 and dropping position $0$ from $c_0\omega$ or position $l-1$ from
-$c_1\omega$ both yield $\langle v_1,\dots,v_{l-1},v,v_{l+1},\dots,v_m\rangle$.
+$c_1\omega$ both yield
+\[\langle v_1,\dots,v_{l-1},v,v_{l+1},\dots,v_m\rangle.\]
 \end{proof}
 
 This is the geometric content of ``splitting the edge $[0,l]$'': the two
@@ -400,126 +406,138 @@ more than one cell, rather than a bare simplex -- is answered in
 itself.
 
 % =====================================================================
-\section{Compatibility beyond the cube: a combinatorial search}
+\section{Compatibility beyond the cube: balanced seeds}
 \label{sec:gaifullin}
 % =====================================================================
 
-\subsection{Definition 9 as a coloring problem}
-
-The global flag/rank mechanism of \Cref{sec:tworoutes} is a
-\emph{sufficient}, not necessary, route to Maubach compatibility --
-Definition 9 itself only constrains \emph{pairs of adjacent cells}, and
-says nothing about vertices globally. This suggests a direct, local
-reformulation. Restricted to the cells of an initial \emph{seed} mesh
-(before any subdivision, so $\level\equiv 0$ and hence $\type(\sigma)=m$
-for every cell), (MaubachA) reads
-\[
-  \partial_i\sigma=\partial_j\omega \;\Longrightarrow\; i=j \ \text{or}\ \{i,j\}=\{0,m\}.
-\]
-This is a per-cell \emph{local vertex ordering} problem: choose, for each
-$m$-cell, a bijection between its $m+1$ vertices and local positions
-$\{0,\dots,m\}$ (equivalently, a coloring of the facet \emph{opposite} each
-vertex by that vertex's position) such that whenever two cells share a
-facet, the two colors assigned to it agree, up to the single allowed
-exception of the pair $\{0,m\}$. Phrased on the mesh's \emph{dual graph}
-(one node per cell, one edge per shared facet), this is a graph-coloring
-search: find a proper edge-coloring of the dual graph by $m+1$ colors that
-also respects, cell by cell, which color each cell may legally place on
-which of its own facets. Unlike \Cref{sec:tworoutes}'s constructions, this
-question is decidable for \emph{any fixed} triangulation, independent of
-whether it carries any algebraic symmetry, simply by search.
-
-\subsection{Gaifullin's triangulation}
-
-The mesh used throughout the rest of this report is A.~Gaifullin's
-15-vertex triangulation of $\CP^2$~\cite{gaifullin} (Construction 1.1 and
-\S3 of that paper), independently cross-checked against GAP's~\cite{gap}
-\texttt{simpcomp}~\cite{simpcomp} library (SCLib entry \#397, ``Gaifullin
-CP\textasciicircum2'', identical f-vector and facet list up to
-relabeling). Its 15 vertices are
-labelled by $(V_4\setminus\{e\})\,\dot\cup\,(\{1,2,3,4\}\times\{1,2,3\})$,
-where $V_4$ is the Klein four-group inside $S_4$; its 108 four-simplices
-have $f$-vector $(f_0,\dots,f_4)=(15,90,240,270,108)$, matching $\CP^2$'s
-own Euler characteristic $3$ ($f_0-f_1+f_2-f_3+f_4=15-90+240-270+108=3$).
-
-Two combinatorial facts about this triangulation matter here, both
-statements about its 108-node, 5-regular dual graph (one node per cell,
-one edge per shared tetrahedral facet -- $108\times5/2=270$ edges,
-matching $f_3=270$ exactly, with a facet-owner histogram of $\{2:270\}$
-confirming every facet is shared by exactly two cells, a genuine closed
-pseudomanifold):
-
-\begin{itemize}
-\item \textbf{Chess colouring (Gaifullin's own term) / orientation
-  coherence.} Gaifullin's paper~\cite{gaifullin} proves this triangulation
-  admits a \emph{chess colouring}: a black/white 2-colouring of the 108
-  four-simplices such that any two sharing a facet get different colours
-  -- exactly a proper 2-colouring of the dual graph, i.e.\ the dual graph
-  is \emph{bipartite}. This is not an incidental fact this project
-  discovered independently; it is a defining property of Gaifullin's
-  construction (his own theorem states this triangulation is the minimal
-  one admitting such a colouring), which we simply re-verified directly
-  (breadth-first 2-colouring, $0$ conflicts, cross-checked against
-  \texttt{simpcomp}~\cite{simpcomp}). It is exactly the condition needed
-  for a globally coherent choice of cell orientations under the standard
-  $(-1)^{\text{local index}}$ boundary-operator sign convention: adjacent
-  cells must always induce \emph{opposite} orientations on their shared
-  facet, and a sign propagation over a non-bipartite dual graph would hit
-  a contradiction on some odd cycle.
-\item \textbf{Maubach compatibility.} The same dual graph admits a proper
-  5-edge-colouring realizing $\partial_i\sigma=\partial_j\omega\Rightarrow
-  i=j$ for every one of the 270 shared facets ($0$ same-index mismatches,
-  the \emph{strong} form, with no need of the $\{0,m\}$ exception at all)
-  -- found by exact backtracking search over the dual graph's edges.
-\end{itemize}
-
-\begin{remthm}[Why the second fact was never really in doubt]
-These are not two independent coincidences. By \emph{K\H{o}nig's
-edge-colouring theorem}, every bipartite graph has chromatic index exactly
-equal to its maximum degree $\Delta$ (bipartite graphs are always ``Class
-1''). The dual graph is $5$-regular ($\Delta=5$, since every $4$-simplex
-has exactly $5$ facets); once it is known to be bipartite -- Gaifullin's
-own chess colouring, above -- König's theorem \emph{guarantees a priori}
-that a proper $5$-edge-colouring exists. So the backtracking search for
-Maubach compatibility was not searching for something that might not
-exist: its existence already followed from Gaifullin's own chess-colouring
-theorem: the search only had to \emph{construct} an explicit instance,
-which the implementation then uses directly as the 108 cells' local
-vertex order. The implication runs one way only, though: bipartiteness
-is the strictly stronger property. A $5$-regular graph can be Class~1
-(5-edge-colorable) without being bipartite -- which is exactly Kühnel's
-own situation in \Cref{sec:kuhnel} below: Maubach-compatible, but not
-orientable.
+\begin{remthm}[Revision note]
+An earlier version of this section formulated Definition~9 on a seed as
+an \emph{edge}-colouring problem on the dual graph. It concluded that
+Kühnel's triangulation is Maubach-compatible in the strong sense, and
+that Gaifullin's triangulation has no global rank. Both conclusions were
+wrong. The dual edge-colouring only requires the omitted vertex to sit at
+the same local \emph{index} on both sides of a facet. Definition~9 needs
+more: equality $\partial_i\sigma=\partial_j\omega$ of \emph{ordered}
+simplices. This section gives the correct formulation, of which the
+implementation was an instance all along: the ordering actually used for
+Gaifullin's cells is a proper vertex colouring.
 \end{remthm}
 
-The 108 cells' local vertex orders, as actually used everywhere
-in the implementation, are precisely the ones this search assigned: local
-position $i$ of a vertex in a cell is the color the 5-edge-coloring gave to
-the facet opposite it.
+\subsection{Strong compatibility is balance}
 
-\subsection{A cautionary counterexample: Kühnel's triangulation}
+A pure $n$-dimensional complex is \emph{balanced} if its vertices admit a
+colouring $\col:V\to\{0,\dots,n\}$ that is injective on every cell.
+Equivalently, its $1$-skeleton is properly $(n{+}1)$-colourable.
+
+\begin{propthm}
+Let $K$ be a conforming mesh (a hereditary pseudomanifold, as in the
+thesis). There is a vertex order in every cell making $K$ strongly
+compatible, i.e.\ $\partial_i\sigma=\partial_j\omega\Rightarrow i=j$ as
+ordered simplices, if and only if $K$ is balanced. The order is then the
+colour order.
+\end{propthm}
+
+\begin{proof}
+($\Leftarrow$) Order every cell by colour. The shared facet of two
+neighbours carries every colour except the one omitted, so $i=j$.
+($\Rightarrow$) Equality of ordered facets with $i=j$ puts every shared
+vertex at the same position in both cells. The star of a vertex $v$ is
+strongly connected, so the position of $v$ is the same in every cell
+containing it. Define $\col(v)$ to be this position.
+\end{proof}
+
+This is the mechanism of Theorems~9 and~10 (\Cref{sec:tworoutes}) in
+general form: the ``global flag/rank'' is precisely a balanced colouring.
+Balance is also exactly the classical condition of
+Traxler~\cite{traxler1997}, and it is the $N=n$ case of the colouring-based
+initialization of Diening, Gehring and Storn~\cite{dgs2025}.
+
+\begin{remthm}[Index-only matching is not enough]
+Here is a $3$-dimensional counterexample to the index-only formulation.
+Take $\sigma=\langle a,b,c,d\rangle$ and
+$\omega=\langle d,x,c,a\rangle$, which share $\{a,c,d\}$ at index $1$ on
+both sides, and both have split edge $\{a,d\}$. After one bisection with
+new vertex $m$, the children $\langle a,b,c,m\rangle$ and
+$\langle x,c,a,m\rangle$ share $\{a,c,m\}$ at indices $1$ and $0$, with
+$\type=2$. This violates (MaubachA): the split edge $\{a,c\}$ of the
+first lies in the second, whose split edge is $\{x,a\}$. By Kőnig's
+theorem, index-only matchings exist whenever the dual graph is
+bipartite, so they are far more common than balance.
+\end{remthm}
+
+\subsection{Colourability criteria}
+
+Joswig~\cite{joswig2002} characterizes balanced complexes by a trivial
+group of projectivities. For simply connected manifolds, this reduces to
+Traxler's criterion: every $(n{-}2)$-face has even degree. A cruder
+obstruction is often enough: a $2$-neighborly complex with more than
+$n+1$ vertices has a complete graph and cannot be balanced. Balance also
+implies a chess colouring:
+
+\begin{lemthm}
+The dual graph of an orientable, balanced, closed pseudomanifold is
+bipartite.
+\end{lemthm}
+
+\begin{proof}
+Fix a coherent orientation. Let $\varepsilon(\sigma)=\pm1$ record whether
+the colour order of $\sigma$ is positively oriented. Two neighbours induce
+on their common facet the orientations $(-1)^k\varepsilon(\sigma)$ and
+$(-1)^k\varepsilon(\omega)$ relative to its colour order. Coherence
+requires these to be opposite.
+\end{proof}
+
+\subsection{Gaifullin's triangulation is balanced}
+
+The mesh used throughout this report is A.~Gaifullin's 15-vertex
+triangulation of $\CP^2$~\cite{gaifullin}, cross-checked against the
+\texttt{simpcomp}~\cite{simpcomp} library of GAP~\cite{gap} (SCLib
+\#397). It has $f$-vector $(15,90,240,270,108)$ and Euler
+characteristic $3$, and its automorphism group $S_4\times S_3$ acts by
+Fubini--Study isometries in Gaifullin's realization.
+
+\begin{propthm}
+Gaifullin's triangulation is balanced. Its colour classes are the natural
+blocks of its vertex set $(V_4\setminus\{e\})\sqcup(\{1,2,3,4\}\times\{1,2,3\})$:
+$V_4\setminus\{e\}$ and $\{a\}\times\{1,2,3\}$ for $a=1,\dots,4$.
+Consequently it is a \emph{vertex-minimal balanced} triangulation of
+$\CP^2$.
+\end{propthm}
+
+\begin{proof}
+Every vertex has degree $12$ in the $1$-skeleton, which has $90$ edges,
+and its two non-neighbours are the other members of its block. Every
+$4$-simplex therefore meets each block exactly once. We checked this
+directly on the facet list. Independently, all $240$ triangles have even
+degree ($180$ of degree $4$ and $60$ of degree $6$), as Traxler's
+criterion requires. For minimality: $\CP^2$ is orientable, so by the
+lemma every balanced triangulation of $\CP^2$ admits a chess colouring.
+Gaifullin proves that his triangulation is vertex-minimal among
+triangulations of $\CP^2$ admitting a chess colouring.
+\end{proof}
+
+The local vertex order used by the implementation for the $108$ cells
+is this colour order: every vertex occupies the same position in every
+cell containing it, and all $270$ shared facets satisfy $i=j$ as ordered
+simplices. The bipartiteness of the dual graph, Gaifullin's chess
+colouring, which the implementation also uses for coherent orientation,
+follows from the lemma. The uniform max/min Fubini--Study edge ratio of
+$1.4636$ across all $108$ cells reflects the isometric symmetry.
+
+\subsection{Kühnel's triangulation is not balanced}
 \label{sec:kuhnel}
 
-An earlier stage of this project attempted the same route with W.~Kühnel
-and T.~Banchoff's classical 9-vertex, 36-cell minimal triangulation of
-$\CP^2$ instead (reproduced in R.~Schwartz's
-\cite{schwartz}). An exact backtracking search there \emph{does} find a
-valid 5-edge-coloring of its own 36-node dual graph realizing $i=j$ always
--- so Kühnel's raw complex is Maubach-compatible in exactly the same
-strong sense as Gaifullin's. Its dual graph, however, is \emph{not}
-bipartite, so global orientation coherence fails outright: no per-cell
-sign choice makes every adjacent pair induce opposite orientations. The
-workaround adopted at the time -- barycentric subdivision, which by
-Theorem 10 is \emph{guaranteed} to be both Maubach-compatible and
-orientable, since its global flag/rank structure fixes both properties at
-once -- introduced its own, unrelated numerical defect: three of Kühnel's
-nine original points are exact affine combinations of two others, so three
-of the barycentric subdivision's new flag-centroid vertices collapse
-exactly onto already-existing vertices, producing degenerate,
-zero-length-edge cells that Maubach's own longest-edge rule can never
-split. Gaifullin's triangulation was adopted instead precisely because it
-satisfies \emph{both} combinatorial properties directly, with no
-subdivision step and hence no vertex-coincidence risk at all.
+W.~Kühnel and T.~Banchoff's $9$-vertex $\CP^2_9$~\cite{schwartz} is
+$3$-neighborly. Its $1$-skeleton is therefore $K_9$, which is not
+$5$-colourable, so no vertex order makes it strongly compatible. The
+search performed earlier in this project found an index-only matching
+(a proper $5$-edge-colouring of its non-bipartite dual graph), which, as
+shown above, does not suffice. The barycentric subdivision of $\CP^2_9$
+is balanced (Theorem~10). In Kühnel's standard realization, however,
+three flag barycentres coincide with existing vertices, because three of
+the nine points are sums of two others. This produces degenerate
+zero-length-edge cells. Gaifullin's triangulation needs no subdivision
+at all.
 
 % =====================================================================
 \section{An economical mesh representation: LPT codes and neighbor finding}
@@ -552,7 +570,7 @@ permutation-table itself.
 
 \subsection{\texttt{glpt}: extending LPT to a non-orbit seed}
 
-This project's \texttt{glpt} code (\texttt{\textasciitilde/code/lpt/glpt.hpp})
+This project's \texttt{glpt} code (\nolinkurl{~/code/lpt/glpt.hpp}, published at \url{https://github.com/vinicius-mello/lpt})
 reuses Atalay \& Mount's $(\level,\mathrm{sigperm},\mathrm{orthant\_level})$
 machinery verbatim -- it is dimension-generic and independent of which
 seed cell a code descends from -- and adds one field, \texttt{seed\_index}
@@ -598,48 +616,67 @@ same-orthant cases, lining up exactly with the $\sim$24\% of cases that
 legitimately do cross a seed boundary.
 
 \subsection{The neighbor function}
+\label{sec:neighbor}
 
-\texttt{glpt::neighbor(i,\,\&result)} resolves a query facet $i$ of a cell
-by one of four different rules, chosen by an exact combinatorial gate --
-this is the one piece of the whole implementation genuinely reshaped by
-moving off Kuhn's cube, and is worth describing in full:
-
+\texttt{glpt::neighbor(i,\,\&result)} is entirely combinatorial and uses
+no floating point. Its rules are:
 \begin{enumerate}
-\item \textbf{The sibling facet} (the one introduced by the cell's own
-  most recent bisection: $i=\dim$ for a $0$-child, $i=\type$ for a
-  $1$-child) is resolved with \emph{no floating-point arithmetic at all},
-  purely combinatorially, as \texttt{parent().child(other bit)}. By Lemma
-  6's own identity ($\partial_0c_0\omega=\partial_{l-1}c_1\omega$), this is
-  \emph{always} exactly the correct neighbor, same seed, no ambiguity --
-  routing it through any geometric path instead was tried first and broke
-  5--15\% of sampled cases, since that facet sits at a finer scale than a
-  generic geometric-nudge tolerance is tuned for.
-\item For every other facet, an \emph{exact} (integer, dyadic-rational, no
-  floating point) test, \texttt{root\_boundary\_facet()}, decides whether
-  the facet lies precisely on one of the seed's own five bounding
-  hyperplanes -- computed from the same barycentric weights Atalay \&
-  Mount's Theorem 1 gives, but kept as exact integers, since repeated
-  bisection is exact in binary and the denominator never exceeds
-  $2^{\text{MAX\_ORTHANT\_LEVEL}+1}$.
-\item If that test says \emph{interior} (no seed boundary), the original
-  $O(1)$ formula (their Theorem 2) is trusted -- verified, by direct
-  comparison against an independently-implemented geometric fallback, to
-  agree in 132799/132801 ($99.9985\%$) of sampled cases.
-\item If the test says \emph{boundary} (always true for a root cell,
-  every one of whose 5 facets is a boundary by definition), the crossing
-  is resolved through Gaifullin's own precomputed $108\times5$ adjacency
-  table, built from the same ``identical local order on both sides'' fact
-  \Cref{sec:gaifullin}'s search established -- landing on a fresh root of
-  the new seed, with no permutation correction needed.
+\item \textbf{The sibling facet}: $i=\dim$ for a $0$-child, $i=\type$
+  for a $1$-child. Return \texttt{parent().child(other bit)}, by Lemma~6.
+\item \textbf{The seed-boundary test}, which takes $O(1)$ time. In
+  Atalay \& Mount's frame, the reference root simplex is
+  $\{1\ge x_1\ge\dots\ge x_d\ge-1\}$, whose facets lie on $x_1=1$,
+  $x_j=x_{j+1}$ and $x_d=-1$. A cell's $k$-th vertex is $(T+y^{(k)})/2^r$.
+  Here $y^{(k)}\in\{-1,0,1\}^d$ depends only on (level, signed
+  permutation, $k$), and $T_j=2^r-1-2o_j$ depends only on the orthant
+  coordinates $o_j$. Facet $i$ lies on root facet $j$ if and only if:
+  \begin{itemize}
+  \item the linear part of that facet's equation is constant on
+    $\{y^{(k)}:k\ne i\}$, a property of (level, signed permutation, $i$)
+    alone, stored in a precomputed table ($4\cdot384\cdot5$ entries);
+  \item one integer comparison holds: $o_1=0$, or $o_{j+1}-o_j=\delta$,
+    or $o_d=2^r-1$.
+  \end{itemize}
+\item \textbf{Interior facet}: Atalay \& Mount's Theorem~2 formula.
+\item \textbf{Seed-crossing facet} on root facet $j$, and every facet of
+  a root cell: return the \emph{same code} in the neighbouring seed
+  $\mathrm{adj}[s][j]$. This is exact because the seed is balanced. The
+  two seeds' barycentric frames agree on their common facet vertex by
+  vertex, so the same descent in the other seed contains the same facet,
+  at the same local index.
 \end{enumerate}
-A genuinely unresolved case, \texttt{GLPT\_DEEP\_CROSSING\_UNIMPLEMENTED},
-is reported explicitly (never guessed) when the region across a facet has
-already been refined \emph{deeper} than the querying cell -- enumerating
-which of possibly several finer descendant leaves border a given
-ancestor-level facet was judged out of scope. Orientation coherence at
-arbitrary depth (not just at the 108 root cells) was checked directly:
-750\,000 sampled (cell, facet) pairs across the full representable depth
-range, $0$ violations.
+This replaced an earlier version that used two expensive steps: a full
+matrix of exact barycentric weights for the boundary test ($O(d^2)$ plus
+a loop over the refinement rounds), and a floating-point point location
+in the adjacent seed for crossings. The earlier path was the only
+source of the two residual disagreements previously reported, at the
+maximum representable depth. It also made the
+\texttt{GLPT\_DEEP\_CROSSING\_UNIMPLEMENTED} sentinel possible, and that
+sentinel can no longer occur.
+
+Verification:
+\begin{itemize}
+\item the table test agrees with the exact weight test on $7.8$ million
+  facets;
+\item same-code crossing agrees with geometric location on $1.4$ million
+  crossings;
+\item \texttt{glpt\_exact\_neighbor\_test} checks $5$ million neighbour
+  queries \emph{exactly}, over depths $0$--$43$, using integer barycentric
+  weights over the $15$ global vertices. It finds no failure, and no
+  non-sibling facet ever changes its local index.
+\end{itemize}
+Timings: $4.3$\,ns against $79$\,ns per boundary test, and $5$\,ns
+against $211$\,ns per crossing. The Riemann-surface program produces
+byte-identical output. Orientation coherence at arbitrary depth was
+checked on $750\,000$ sampled (cell, facet) pairs, with $0$ violations.
+
+\paragraph{Why codes.}
+A pure-topology benchmark (\texttt{mesh\_mem.cpp}) refines Gaifullin's
+seed uniformly. It measured $222$ bytes of records per leaf for the
+append-only \texttt{nmt<4>} container, which also keeps twice as many
+cells as are current, against $19.5$ bytes per leaf for the
+\texttt{glpt\_tree} hash table: an $11\times$ reduction before any
+per-vertex data is attached.
 
 \subsection{The current-leaf set: \texttt{glpt\_tree}}
 \label{sec:tree}
@@ -948,29 +985,91 @@ have failed, unlike repair, which only ever touches cells that already
 did); combining both -- one proactive, one reactive -- is the best result
 measured, roughly halving the baseline rate.
 
+\subsection{Bad-cell rate versus depth}
+
+A sweep over four curves and depths $8$--$16$ (and $18$ for the elliptic
+curve) shows a steady decrease, roughly halving every two levels.
+Tangency threshold plus repair rounds lowers the rate by a factor of
+$1.5$--$3$ at every depth. Curves of higher degree need a few more
+levels to reach the same rate. At depth $16$ the combined rate is:
+\begin{itemize}
+\item $0.46\%$ for the conic;
+\item $0.74\%$ for the elliptic curve ($0.39\%$ at depth $18$);
+\item $3.1\%$ for the Fermat cubic;
+\item $4.3\%$ for the Fermat quartic.
+\end{itemize}
+The data (\texttt{badrate.csv}) and the plot are in the article's
+\texttt{figures/} directory.
+
+\subsection{Topological verification and closing}
+\label{sec:topology}
+
+Bad cells leave holes, but the topology can still be verified. The
+extracted polygons form a $2$-complex in $\CP^2$, whose vertices are
+identified by crossing-node identity: the mesh vertex, edge or $2$-face
+the crossing lies on. So the Euler characteristic is available
+independently of any projection.
+
+\texttt{--genus-check} proceeds as follows:
+\begin{itemize}
+\item It splits every \emph{pinched} vertex into one copy per link
+  component. A pinched vertex is one whose link has more than one
+  component. In all runs, every pinched vertex lies on hole boundaries:
+  its link is two paths. About two thirds are a hole touching itself; the
+  rest are two holes meeting.
+\item It then computes $g=(2c-b-\chi)/2$, where $c$ is the number of
+  components and $b$ the number of boundary loops.
+\end{itemize}
+This recovers the genus $(n-1)(n-2)/2$ exactly for the conic, the
+elliptic curve and the Fermat cubic at depth $14$, the elliptic curve at
+depth $18$, and the Fermat quartic at depth $17$, even at a bad-cell rate
+of $5.9\%$. In particular, every hole is a disc.
+
+\texttt{--close} turns the complex into a closed surface:
+\begin{itemize}
+\item it splits the pinched vertices;
+\item it keeps the main component, dropping islands of $1$ to $18$ faces;
+\item it caps every hole with a cone from a \emph{new} apex, placed at
+  the Fubini--Study barycentre of the loop and moved onto the curve by
+  Newton's method. A fan from an existing vertex could duplicate an
+  edge.
+\end{itemize}
+It then verifies the result: every edge lies in two faces, every link is
+one cycle, the surface is connected, and $\chi=2-2g$. The verification
+passed in every case above ($\chi=2,0,0,0,-4$), and every cone apex
+reached the curve.
+
+
 % =====================================================================
 \section{Conclusion}
 % =====================================================================
 
-Maubach's invariants (Definition 9, Chapter 4 of the thesis) are a purely
-combinatorial condition, and the thesis's own two constructive routes to
-satisfying it -- products of simplices and barycentric subdivision -- both
-work by exhibiting a global vertex rank, a structure tied closely to
-Kuhn's cube and to dimension $\le3$, the setting the rest of the thesis
-develops the idea in. This report showed the condition is more general
-than that: reformulated as a local, per-facet coloring problem on a mesh's
-dual graph, it is decidable by direct search for \emph{any} fixed
-triangulation, with no algebraic symmetry required at all, and Gaifullin's
-108-cell, real-dimension-4 triangulation of $\CP^2$ satisfies it this way.
-Built on top of that mesh, an economical LPT-style cell code (extending
-Atalay \& Mount's original pointerless scheme, with its neighbor-finding
-rules substantially reworked once the seed cells stop forming a single
-group orbit) supports, as a genuine downstream application, an adaptive
-triangulation algorithm for algebraic curves -- Riemann surfaces -- living
-directly inside $\CP^2$, whose current, continuation-based version
-recovers a curve's mesh at a fraction of the earlier algorithm's memory
-cost, at depths and mesh sizes the original \texttt{nmt<4>}-based
-implementation could not reach at all.
+Maubach's invariants (Definition~9, Chapter~4 of the thesis) are a
+purely combinatorial condition. The thesis's two constructive routes,
+products of simplices and barycentric subdivision, work by exhibiting a
+global vertex rank. This report identifies that rank as a
+\emph{balanced colouring}: on a conforming mesh, strong compatibility is
+equivalent to balance. The question of which seeds can be used thus
+reduces to graph colouring, and it connects with Traxler's condition,
+with the colouring-based initialization of Diening, Gehring and
+Storn~\cite{dgs2025}, and with the combinatorics of balanced manifolds.
+For $\CP^2$, Kühnel's $9$-vertex triangulation is not balanced. Gaifullin's
+$15$-vertex triangulation is balanced, and it is a vertex-minimal
+balanced triangulation of $\CP^2$.
+
+Balance is also what makes Atalay \& Mount's pointerless LPT codes
+portable to arbitrary seeds. A seed index and a seed adjacency table
+suffice. The seed-boundary test is a table lookup plus one integer
+comparison, and crossing into the next seed keeps the code unchanged.
+The resulting mesh uses about $20$ bytes per leaf. On top of it, a
+continuation algorithm triangulates smooth plane curves, i.e.\ Riemann
+surfaces, directly inside $\CP^2$. Its output is not certified, but its
+topology is verified a posteriori, and a topological closing step turns
+it into a closed surface of the correct genus.
+
+The material of this report has been reorganized into an article draft
+(\nolinkurl{report/article/article.tex}), which also contains a survey of
+related work.
 
 % =====================================================================
 \appendix
@@ -1078,23 +1177,13 @@ $\mathrm{RANK}$ exactly as \Cref{prop:product} predicts.
 \begin{remthm}[Local compatibility is not enough -- a caveat]
 \label{rem:localglobal}
 \Cref{prop:product}'s hypothesis is that $K_1,K_2$ each admit a
-\emph{global} rank -- which is stronger than merely satisfying the strong
-invariant \emph{pairwise}, cell by adjacent cell (the sense in which
-\Cref{sec:gaifullin}'s search establishes compatibility for Gaifullin's
-own triangulation, with no global rank claimed or checked there). The two
-notions are not automatically equivalent: consider the $1$-dimensional
-mesh consisting of a single $3$-cycle of edges (a triangle, as a graph,
-not as a filled $2$-simplex). Every pair of adjacent edges can be locally
-reordered to agree at their shared vertex ($i=j$), exactly as in the path
-example above -- but no consistent global $2$-coloring of its three
-vertices exists, since a $3$-cycle is not bipartite. This is the same
-odd-cycle obstruction already met in \Cref{sec:gaifullin} for Kühnel's
-triangulation, there blocking global \emph{orientation} coherence rather
-than a rank; here it blocks the rank itself. So \Cref{prop:product} may
-not be invoked for a product whose factors are only known compatible in
-the weaker, local sense -- one must exhibit (or separately verify) an
-actual global rank on each factor first, exactly as the octahedron example
-below does.
+\emph{global} rank, i.e.\ that they are balanced (\Cref{sec:gaifullin}).
+Index-only agreement, the same local \emph{index} on both sides of each
+facet, is weaker and does not suffice. The $1$-dimensional $3$-cycle
+already shows this: pairs of adjacent edges can be ordered to agree, but
+the three vertices admit no global $2$-colouring. For Gaifullin's
+triangulation the global rank does exist. It is the colouring of
+\Cref{sec:gaifullin}.
 \end{remthm}
 
 \begin{remthm}[The motivating case: the octahedron]
@@ -1281,9 +1370,9 @@ International Journal of Computational Geometry \& Applications, 2007.
 
 \bibitem{gaifullin}
 A.A. Gaifullin.
-\emph{Construction of combinatorial manifolds with prescribed sets of
-links of vertices}.
-arXiv:0904.4222.
+\emph{A minimal triangulation of complex projective plane admitting a
+chess colouring of four-dimensional simplices}.
+Proc.\ Steklov Inst.\ Math.\ 266:29--48, 2009. arXiv:0904.4222.
 
 \bibitem{schwartz}
 R.E. Schwartz.
@@ -1300,6 +1389,21 @@ Felix Effenberger and Jonathan Spreer.
 \emph{simpcomp -- a GAP toolbox for simplicial complexes}.
 ACM Communications in Computer Algebra, 44(4):186--189, 2010.
 arXiv:1004.1367.
+
+\bibitem{traxler1997}
+C.T. Traxler.
+\emph{An algorithm for adaptive mesh refinement in $n$ dimensions}.
+Computing, 59(2):115--137, 1997.
+
+\bibitem{dgs2025}
+L. Diening, L. Gehring, J. Storn.
+\emph{Adaptive mesh refinement for arbitrary initial triangulations}.
+Found.\ Comput.\ Math., 2025. arXiv:2306.02674.
+
+\bibitem{joswig2002}
+M. Joswig.
+\emph{Projectivities in simplicial complexes and colorings of simple
+polytopes}. Math.\ Z., 240(2):243--259, 2002.
 
 \end{thebibliography}
 
