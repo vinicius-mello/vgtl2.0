@@ -1,0 +1,548 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\usepackage{cleveref}
+
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\crefname{theorem}{Theorem}{Theorems}
+\crefname{lemma}{Lemma}{Lemmas}
+\crefname{proposition}{Proposition}{Propositions}
+\crefname{corollary}{Corollary}{Corollaries}
+\crefname{definition}{Definition}{Definitions}
+\crefname{remark}{Remark}{Remarks}
+
+\newcommand{\CP}{\mathbb{CP}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\type}{\mathrm{type}}
+\newcommand{\level}{\mathrm{level}}
+\newcommand{\msplit}{\mathrm{split}}
+\newcommand{\weld}{\mathrm{weld}}
+\newcommand{\st}{\mathrm{st}}
+\newcommand{\pos}{\mathrm{pos}}
+\setlength{\emergencystretch}{2em}
+
+\title{\bf Stellar subdivision schemes that split $2$-faces,\\ and typed-cycle hybrids with Maubach bisection}
+\author{Research note (not part of the article)}
+\date{30 September 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We record a stellar subdivision scheme for $4$-dimensional ordered meshes
+that splits a $2$-face (a triangle) of each cell instead of an edge
+(Maubach) or a facet (Mitchell). With the right rule for the types of the
+children, the scheme is combinatorially correct: its invariants are
+Maubach's with the split edge $\{0,l\}$ replaced by the split face
+$\{0,1,l\}$, and the proof of the article goes through verbatim. The
+scheme belongs to a family of \emph{typed cycles}, for which we give three
+local conditions that are sufficient, and in exhaustive tests also
+necessary, for the invariants to be preserved. Geometrically, however, a
+scheme that splits only faces of dimension $\ge2$ never removes an edge,
+so cell diameters never tend to zero. Hybrid cycles mixing edge and face
+splits do shrink cells, but none of those we tested keeps shape
+regularity. All claims marked \emph{verified} were checked by the
+scripts in \texttt{scripts/}.
+\end{abstract}
+
+\section{Setting}
+
+We use the notation and framework of the article
+(\emph{Stellar subdivision schemes and pointerless Maubach bisection on
+balanced seeds}, \S3). A cell is an ordered $d$-simplex
+$\sigma=\langle\sigma[0],\dots,\sigma[d]\rangle$, $\partial_i$ deletes the
+$i$-th vertex, and equalities $\partial_i\sigma=\partial_j\omega$ are
+equalities of \emph{ordered} simplices. An ordered stellar subdivision
+$(\delta,v)_l$ of a face $\delta=\sigma[p_0,\dots,p_k]$ replaces every cell
+$\sigma\supseteq\delta$ by its $k+1$ children
+\[
+  c_p\sigma \;=\; \text{$\sigma$ with $\sigma[p]$ deleted and $v$ inserted at position $l$},\qquad p\in\{p_0,\dots,p_k\},
+\]
+so that
+\begin{equation}\label{eq:outer}
+  \partial_l\,c_p\sigma=\partial_p\sigma .
+\end{equation}
+A \emph{seed} is \emph{strongly compatible} if all its cells have level $0$
+and $\partial_i\sigma=\partial_j\omega$ implies $i=j$. Equivalently, the
+seed is balanced and every cell is ordered by color. Examples are Kuhn's
+cube and Gaifullin's $\CP^2_{15}$.
+
+\section{The face scheme}\label{sec:face}
+
+Let $d=4$ and $\sigma=\langle a,b,c,d,e\rangle$. The proposal assigns to
+each cell an integer $l(\sigma)\in\{4,3,2\}$ (equivalently a type in
+$\{0,1,2\}$), splits the $2$-face
+\[
+  F(\sigma)=\{0,1,l(\sigma)\}
+\]
+(that is, $\langle a,b,e\rangle$, $\langle a,b,d\rangle$ or
+$\langle a,b,c\rangle$), and inserts the new vertex $v$ at position
+$l(\sigma)$:
+\begin{center}
+\begin{tabular}{@{}ccl@{}}
+\toprule
+$l$ & split face & children \\
+\midrule
+$4$ & $\langle a,b,e\rangle$ & $\langle a,b,c,d,v\rangle,\ \langle a,c,d,e,v\rangle,\ \langle b,c,d,e,v\rangle$\\
+$3$ & $\langle a,b,d\rangle$ & $\langle a,b,c,v,e\rangle,\ \langle a,c,d,v,e\rangle,\ \langle b,c,d,v,e\rangle$\\
+$2$ & $\langle a,b,c\rangle$ & $\langle a,b,v,d,e\rangle,\ \langle a,c,v,d,e\rangle,\ \langle b,c,v,d,e\rangle$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{The type of the children.}
+The proposal does not fix $l$ for the children. There are three
+level-independent choices, and only one of them works (verified).
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+rule for the children & result on the reflected Kuhn torus $\mathbb{Z}_4^4$ ($6144$ cells)\\
+\midrule
+same $l$ as the parent                   & incompatible after one uniform round ($12288$ of $18432$ cells)\\
+$l\mapsto l+1$ (i.e.\ $2\to3\to4\to2$)     & incompatible after one uniform round\\
+$l\mapsto l-1$ (i.e.\ $4\to3\to2\to4$)     & compatible (\Cref{thm:face})\\
+\bottomrule
+\end{tabular}
+\end{center}
+So, as in Maubach's scheme, $l$ decreases by one per level and wraps
+around:
+\[
+  l(\sigma)=4-(\level(\sigma)\bmod 3).
+\]
+This is Maubach's rule
+$\type(\sigma)=d-(\level(\sigma)\bmod d)$ with the \emph{prefix} $\{0\}$ of
+the split edge $\{0,l\}$ replaced by the prefix $\{0,1\}$.
+
+\begin{definition}[face invariants]\label{def:face}
+A $4$-mesh satisfies the \emph{face invariants} if it satisfies
+(OneLevel) and, for adjacent cells with $\partial_i\sigma=\partial_j\omega$,
+\begin{align*}
+  \level(\sigma)=\level(\omega)&\;\Longrightarrow\; i=j\ \text{ or }\ \{i,j\}\subseteq F(\sigma), \tag{A}\\
+  \level(\sigma)=\level(\omega)+1&\;\Longrightarrow\; i=l(\omega)\ \text{ and }\ j\in F(\omega). \tag{B}
+\end{align*}
+\end{definition}
+In (B), $i=l(\omega)$ is the position of the weld vertex of the finer
+cell. A strongly compatible seed satisfies the face invariants.
+
+\begin{theorem}\label{thm:face}
+On a conforming $4$-mesh satisfying the face invariants, the Maubach
+refinement algorithm (\textsc{MaubachSubdivide} in the article), with the split edge
+$\sigma[0,\type(\sigma)]$ replaced by the split face $\sigma[F(\sigma)]$,
+the loop over $i\in\{1,\dots,d\}\setminus\{\type(c)\}$ replaced by
+$i\notin F(c)$, and the new vertex inserted at $l(\sigma)$, terminates and
+only splits cells of level at most $\level(\sigma)$. It produces a
+conforming mesh satisfying the face invariants, and it is consistent,
+alternating and level-homogeneous.
+\end{theorem}
+
+This is the case $d=4$, $k=2$ of \Cref{thm:prefix}, which in turn is a
+special case of \Cref{thm:cycle}. The proof is in \Cref{sec:cycles}.
+
+\paragraph{Empirical invariants.}
+Under uniform and adaptive refinement from the Kuhn torus (up to level
+$10$), the exceptional pairs in (A) are more restricted than (A) allows.
+With $l=4$ only $\{i,j\}=\{0,1\}$ occurs, and with $l\in\{3,2\}$ only
+$\{0,l\}$ and $\{1,l\}$ occur. Every shared facet is an equality of ordered
+simplices. The weaker statement (A) is the one that is preserved
+inductively, so it is the one to state.
+
+\paragraph{Why the other rules fail.}
+In the language of \Cref{sec:cycles}, the two rejected rules fail for
+different reasons.
+\begin{itemize}
+\item With $l$ fixed, (C1) fails: the weld position $l$ belongs to the
+  children's split face $\{0,1,l\}$, so a child would have to split a
+  face containing its own weld vertex.
+\item With $l\mapsto l+1$, (C1) holds but (C2) fails. For $l=3$, the
+  children $\langle b,c,d,v,e\rangle$ and $\langle a,b,c,v,e\rangle$
+  (deleting $a$ and $d$) share their facet at positions $2$ and $0$. That
+  pair is not contained in the next split face $\{0,1,4\}$.
+\end{itemize}
+
+\section{The prefix family}\label{sec:prefix}
+
+For $1\le k\le d-1$ and $l\in\{k,\dots,d\}$ put
+\[
+  F_l=\{0,1,\dots,k-1\}\cup\{l\},\qquad l(\sigma)=d-(\level(\sigma)\bmod(d-k+1)),
+\]
+split $\sigma[F_{l(\sigma)}]$, a $k$-face, and insert the new vertex at
+$l(\sigma)$. The case $k=1$ is Maubach bisection, and $k=2$, $d=4$ is
+\Cref{sec:face}. For $k=d-1$ there are two types, splitting the facets
+$\partial_{d-1}$ and $\partial_d$ alternately.
+
+\begin{theorem}\label{thm:prefix}
+For every $d\ge2$ and $1\le k\le d-1$, the prefix scheme satisfies the
+conclusions of \Cref{thm:face}, with invariants (A) and (B) for
+$F(\sigma)=F_{l(\sigma)}$.
+\end{theorem}
+
+\begin{proof}
+We check conditions (C0)--(C2) of \Cref{thm:cycle}. (C0) holds because
+$l=\max F_l$. For (C1), the next split face is
+$F_{l'}=\{0,\dots,k-1\}\cup\{l'\}$ with $l'=l-1$, or $l'=d$ if $l=k$.
+Since $l\ge k$ and $l'\ne l$ (there are $d-k+1\ge2$ types), $l\notin F_{l'}$.
+For (C2), let $p<q$ in $F_l$ and compute $\pos_p(q)$ and $\pos_q(p)$ as
+in \eqref{eq:pos}.
+\begin{itemize}
+\item If $q<k$, the pair is $\{q-1,p\}$, contained in
+  $\{0,\dots,k-2\}\subseteq F_{l'}$.
+\item If $q=l$, the pair is $\{l-1,p\}$ with $p\le k-1$. When $l>k$,
+  $l-1=l'\in F_{l'}$. When $l=k$, $l-1=k-1$ lies in the prefix.
+\end{itemize}
+This proves the theorem. It was also verified exhaustively for all
+$d\le7$ and all $k$ by checking the two-cell lemma symbolically.
+\end{proof}
+
+\section{Typed cycles}\label{sec:cycles}
+
+\begin{definition}
+A \emph{typed cycle} in dimension $d$ is a finite sequence
+$T=(\tau_0,\dots,\tau_{n-1})$ of pairs $\tau=(F_\tau,l_\tau)$, with
+$F_\tau\subseteq\{0,\dots,d\}$, $|F_\tau|\ge2$, and $l_\tau\in\{0,\dots,d\}$.
+A cell $\sigma$ has type $\tau(\sigma)=\tau_{\level(\sigma)\bmod n}$. It is
+refined by the ordered stellar subdivision of $\sigma[F_{\tau(\sigma)}]$
+with the new vertex at position $l_{\tau(\sigma)}$. We write
+$F(\sigma)=F_{\tau(\sigma)}$ and $l(\sigma)=l_{\tau(\sigma)}$, and denote by
+$\tau^+$ the type after $\tau$.
+\end{definition}
+
+A typed cycle may mix edge types ($|F|=2$), face types ($|F|=3$) and so on.
+Maubach bisection is $((\{0,d\},d),(\{0,d-1\},d-1),\dots,(\{0,1\},1))$. The
+invariants (A) and (B) of \Cref{def:face} make sense verbatim for any
+typed cycle.
+
+For $p\ne q$, let
+\begin{equation}\label{eq:pos}
+  \pos_p(q)=r+[\,r\ge l\,],\qquad r=q-[\,p<q\,],
+\end{equation}
+be the position of $\omega[q]$ in the child $c_p\omega$.
+
+\begin{definition}\label{def:conditions}
+A typed cycle is \emph{admissible} if for every type $\tau=(F,l)$:
+\begin{enumerate}[label=(C\arabic*),start=0]
+\item not $\min F<l<\max F$;
+\item $l\notin F_{\tau^+}$;
+\item for all $p<q$ in $F$, either $\pos_p(q)=\pos_q(p)$ or
+  $\{\pos_p(q),\pos_q(p)\}\subseteq F_{\tau^+}$.
+\end{enumerate}
+\end{definition}
+
+The conditions have the following meaning. (C0) makes two siblings meet
+along the same \emph{ordered} facet. (C1) is the alternating property,
+and it drives the direction lemma. (C2) says that two siblings satisfy (A).
+
+\begin{lemma}[direction]\label{lem:dir}
+Assume (C1) and the invariants, and let $\partial_i\sigma=\partial_j\omega$.
+If $i\notin F(\sigma)$ then $\level(\omega)\le\level(\sigma)$, and if
+$i\in F(\sigma)$ then $\level(\omega)\ge\level(\sigma)$. If the levels are
+equal and $i\notin F(\sigma)$, then $i=j$ and
+$\sigma[F(\sigma)]=\omega[F(\omega)]$.
+\end{lemma}
+
+\begin{proof}
+If $\omega$ is finer, (B) for $(\omega,\sigma)$ gives $i\in F(\sigma)$. If
+$\omega$ is coarser, (B) gives $i=l(\omega)$, and $l(\omega)\notin F(\sigma)$
+by (C1), because $\tau(\sigma)=\tau(\omega)^+$. At equal levels with
+$i\notin F$, (A) forces $i=j$. The two cells then differ only at
+position $i\notin F$, so they have the same split face.
+\end{proof}
+
+\begin{lemma}[siblings]\label{lem:sib}
+Let $\omega$ have type $\tau=(F,l)$ and let $p<q$ be in $F$. Under (C0), the
+children $c_p\omega$ and $c_q\omega$ share the facet
+$\partial_{\pos_p(q)}c_p\omega=\partial_{\pos_q(p)}c_q\omega$ as ordered
+simplices. Under (C2), this pair satisfies (A).
+\end{lemma}
+
+\begin{proof}
+Both children contain $v$ and $\omega\setminus\{\omega[p],\omega[q]\}$. The
+vertices of $\omega$ keep their relative order, so the two ordered
+facets can differ only in where $v$ sits. The vertex $v$ sits at position
+$l$ in both children, so its predecessors are the first $l$ entries of
+$\omega$ with $\omega[p]$ (respectively $\omega[q]$) removed.
+\begin{itemize}
+\item If $l\ge\max F$, these are $\{\omega[0..l]\}\setminus\{\omega[p]\}$ and
+  $\{\omega[0..l]\}\setminus\{\omega[q]\}$.
+\item If $l\le\min F$, both are $\{\omega[0..l-1]\}$.
+\end{itemize}
+In either case they agree after removing $\omega[q]$ and $\omega[p]$
+respectively. If instead $p<l<q$, the vertex $\omega[l]$ precedes $v$ in
+one facet and follows it in the other. The indices in the two children
+are $\pos_p(q)$ and $\pos_q(p)$, and the children have type $\tau^+$, so (C2)
+is exactly (A).
+\end{proof}
+
+\begin{lemma}[two cells]\label{lem:two}
+Let $\sigma,\omega$ be adjacent with $\partial_i\sigma=\partial_j\omega$ and
+$0\le\level(\sigma)-\level(\omega)\le1$, and let them satisfy the
+invariants. Let $\tau=(F,l)$ be the type of $\omega$. Split $\omega$, and also
+$\sigma$ if it contains $\omega[F]$. Then every adjacent pair formed by a
+child of $\omega$ and $\sigma$ or a child of $\sigma$ satisfies the
+invariants.
+\end{lemma}
+
+\begin{proof}
+There are three cases.
+\begin{enumerate}[label=(\alph*)]
+\item \emph{Equal levels, $j\notin F$.} By \Cref{lem:dir}, $i=j$ and
+  $\sigma$ has the same split face, so both cells are split. The children
+  $c_p\sigma$ and $c_p\omega$ come from the same positional operation
+  applied to two cells that differ only at position $i$, so they differ
+  only at position $\pos_p(i)$. This satisfies (A) with equal indices.
+  Children with different $p$ share at most $d-1$ vertices.
+\item \emph{Equal levels, $j\in F$.} The facet omits $\omega[j]\in\omega[F]$,
+  so $\sigma$ does not contain the split face and is not split. By
+  \eqref{eq:outer}, $\partial_j\omega=\partial_l c_j\omega$. The pair
+  $(c_j\omega,\sigma)$ has levels $\ell+1,\ell$. The finer index is
+  $l=l(\sigma)$, and the coarser index is $i\in F(\sigma)$ by (A), since
+  $j\in F$ and either $i=j$ or $\{i,j\}\subseteq F$. This is (B).
+\item \emph{$\level(\sigma)=\level(\omega)+1$.} By (B), $i=l$ and $j\in F$, and
+  only $\omega$ is split. Now $\partial_l\sigma=\partial_j\omega=\partial_l c_j\omega$,
+  with equal levels and equal indices: (A).
+\end{enumerate}
+(OneLevel) holds in every case.
+\end{proof}
+
+It remains to see that there are no other new adjacencies. A facet of
+$c_p\omega$ either omits $v$, in which case it is $\partial_l c_p\omega=\partial_p\omega$,
+the outer facet treated in (b) and (c); or it contains $v$ and omits some
+$\omega[s]$. If $s\in F$, the neighbor across it is the sibling $c_s\omega$
+(\Cref{lem:sib}). If $s\notin F$, the facet contains all of $\omega[F]$
+except $\omega[p]$, and the neighbor is the child $c_p\omega'$ of the cell
+$\omega'$ across $\partial_s\omega$, which lies in the star of the split
+face. This is case (a).
+
+\begin{theorem}\label{thm:cycle}
+Let $T$ be an admissible typed cycle and $K$ a conforming mesh satisfying
+(OneLevel), (A) and (B), for example a strongly compatible seed. Then the
+generalized Maubach algorithm (\Cref{alg:cycle}) terminates, only splits
+cells of level at most $\level(\sigma)$, and preserves conformity and
+the invariants. It is consistent, alternating and level-homogeneous.
+\end{theorem}
+
+\begin{proof}
+The proof of the Maubach theorem of the article (\S\,Maubach's
+scheme) carries over word for word, with \Cref{lem:dir,lem:sib,lem:two}
+in place of its direction, children and two-cells lemmas. We only list
+the replacements.
+\begin{itemize}
+\item The facets explored by the breadth-first search are those that
+  contain the split face, $\partial_i c$ with $i\notin F(c)$.
+\item The neighbor across such a facet is never finer
+  (\Cref{lem:dir}).
+\item A coarser neighbor $\omega$ meets $c$ along $\partial_j\omega$ with
+  $j\in F(\omega)$, which passes whole to the child $c_j\omega$
+  (case (c)).
+\item Alternation is (C1).
+\end{itemize}
+\end{proof}
+
+\begin{algorithm}[t]
+\caption{$\textsc{CycleSubdivide}(K,\sigma)$ (\textsc{MaubachSubdivide} with $F$)}
+\label{alg:cycle}
+\begin{algorithmic}[1]
+\State $\epsilon\gets\sigma[F(\sigma)]$;\ $\mathit{st}\gets[\,]$;\ $Q\gets(\sigma)$
+\While{$Q\neq\varnothing$}
+  \State $c\gets\mathrm{pop}(Q)$
+  \If{$c$ not visited}
+    \State mark $c$ visited; append $c$ to $\mathit{st}$
+    \For{$i\in\{0,\dots,d\}\setminus F(c)$} \Comment{facets of $c$ containing $\epsilon$}
+      \State $c_a\gets$ the cell across $\partial_i c$ (skip if none)
+      \If{$\level(c_a)<\level(c)$}
+        \State $\textsc{CycleSubdivide}(K,c_a)$;\ $c_a\gets$ the cell across $\partial_i c$
+      \EndIf
+      \State \textbf{if} $c_a$ not visited \textbf{then} push $c_a$ onto $Q$
+    \EndFor
+  \EndIf
+\EndWhile
+\State apply $(\epsilon,v)_{l(\sigma)}$ to every cell of $\mathit{st}$
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Necessity (verified, not proved).}
+In dimension $4$ we ran an exhaustive symbolic check of the sibling and
+two-cell configurations allowed by (A) and (B). Admissibility agrees with
+this check on all $125$ one-type and $15625$ two-type cycles over
+$|F|\in\{2,3,4\}$, and on $200000$ random cycles of length $3$--$5$. So,
+for the invariants (A) and (B), conditions (C0)--(C2) are not only
+sufficient but also necessary for these to be preserved. Other invariants
+could in principle admit other schemes.
+
+\section{Geometry}\label{sec:geometry}
+
+\subsection{Faces alone never shrink cells}
+
+\begin{proposition}\label{prop:edges}
+If every type of a typed cycle has $|F|\ge3$, no edge of the mesh is ever
+removed. In particular, the edges of the seed persist at every level, and
+the maximal cell diameter does not tend to zero.
+\end{proposition}
+
+\begin{proof}
+The stellar subdivision $(\delta,v)$ removes exactly the simplices
+containing $\delta$. An edge does not contain a face $\delta$ with at
+least three vertices.
+\end{proof}
+
+For the face scheme on Kuhn's cube with $v$ at the centroid of the face,
+the child $\langle a,c,d,e,v\rangle$ of a level-$0$ cell keeps the diagonal
+$ae$. The minimal quality $\mathrm{vol}/h^4$ falls by a factor $3$ per level
+(verified): $0.33$, $0.11$, $0.037$, \dots, $0.0014$ at level $6$,
+relative to level $0$. In the Riemann-surface application, the cells
+around the curve become needles along seed edges and never get small.
+
+\subsection{What to ask of a scheme on $\CP^2$}
+
+On Kuhn's cube, Maubach bisection has finitely many similarity classes.
+This is \emph{not} the criterion that matters on $\CP^2$: with
+Fubini--Study midpoints no two cells are similar, and the classes are
+infinite even for Maubach. What we want is:
+\begin{enumerate}[label=(G\arabic*)]
+\item \emph{Shrinking:} the maximal diameter $h_\ell$ at level $\ell$ tends
+  to zero at a uniform rate. A necessary combinatorial condition is a
+  finite \emph{edge lifetime}: there is an $L$ such that no edge of a
+  cell survives in its descendants $L$ levels below.
+\item \emph{Shape regularity:} the quality of the cells stays bounded
+  below, or at least degrades slowly.
+\end{enumerate}
+The flat test on Kuhn's cube is still the right \emph{necessary} test. At
+fine levels a cell of a smooth triangulation of $\CP^2$ lies in a region
+where the Fubini--Study metric is flat up to $O(h^2)$, and geodesic
+midpoints are affine midpoints up to $O(h^2)$. A scheme whose descendants
+degenerate in the flat model therefore degenerates on $\CP^2$ as well.
+Bounded quality on Kuhn's cube, and not finiteness of the classes, is the
+property that transfers. We measure the \emph{shrinking exponent}
+$\alpha$ defined by $h_\ell\approx N_\ell^{-\alpha}$, where $N_\ell$ is the
+number of descendants of one cell. The ideal is $\alpha=1/d$: Maubach has
+$\alpha=1/4$ exactly, since each cycle doubles the resolution with
+$2^4$ cells.
+
+\subsection{How a hybrid works}
+
+A hybrid is an admissible typed cycle that contains both edge types and
+face types. Refinement works as in Maubach's algorithm:
+\begin{itemize}
+\item Each cell knows its level, hence its type $\tau=(F,l)$.
+\item To refine $\sigma$, collect the star of the split simplex
+  $\sigma[F]$, recursively refining coarser neighbors first.
+\item Apply one stellar subdivision with the new vertex at position $l$.
+\end{itemize}
+An edge step splits the star of an edge into $2$ children per cell. A
+face step splits the star of a triangle, which in a $4$-manifold is a
+cycle of cells since the link of a triangle is a circle, into $3$
+children per cell. The new vertex goes at the midpoint of the edge or at
+the centroid of the triangle. On $\CP^2$ we use the Fubini--Study
+barycenter. The motivation for the Riemann-surface application is that
+face steps split exactly the kind of simplex that is tested against the
+curve.
+
+The \emph{pointerless} (LPT) encoding of the article carries over. A cell
+is still a root plus a path of child indices, now with $|F_\tau|$ possible
+children at a step of type $\tau$. The neighbor-finding rules must be
+rederived from \eqref{eq:outer} and \Cref{lem:sib}.
+
+\subsection{Search results in dimension $4$}
+
+All numbers below are from uniform refinement of one Kuhn simplex, with
+midpoints and centroids. Descendants are deduplicated by similarity,
+keeping the largest scale. This is exact while the number of classes is
+below the cap, and a random sample above it. Sampling can only
+\emph{overestimate} the minimal quality, so the degradation is at least
+as bad as reported.
+\begin{itemize}
+\item \emph{Cycles of length $\le3$ mixing $|F|=2$ and $|F|=3$.} $2184$ are
+  admissible ($48$ of length $2$, $2136$ of length $3$). Of these, $1392$
+  have finite edge lifetime ($4$ to $7$ levels; Maubach has $3$ to $5$).
+  None comes close to Maubach: after $12$ levels the best has
+  $\alpha\approx0.11$ and minimal quality below $0.003$. This is expected,
+  since a cycle of length $\le3$ cannot contain the $4$ edge types that
+  Maubach needs.
+\item \emph{Maubach with one face step.} Inserting one arbitrary face type
+  into Maubach's $4$-cycle is never admissible. Replacing one edge type is
+  admissible in exactly $3$ ways, all of which replace $(\{0,2\},2)$ by
+  $(\{0,1,2\},l)$ with $l\in\{2,3,4\}$. The best is
+  \[
+    T^\ast=\bigl((\{0,4\},4),\ (\{0,3\},3),\ (\{0,1,2\},2),\ (\{0,1\},1)\bigr),
+  \]
+  a variable-prefix scheme ($k=1,1,2,1$). Per cycle of $24$ cells:
+  \begin{center}
+  \begin{tabular}{@{}lcccccc@{}}
+  \toprule
+  cycle & 1 & 2 & 3 & 4 & 5 & 6\\
+  \midrule
+  $h$, Maubach ($16\times$ cells/cycle)   & $0.500$ & $0.250$ & $0.125$ & $0.062$ & $0.031$ & $0.016$\\
+  $q_{\min}$, Maubach                     & $1$ & $1$ & $1$ & $1$ & $1$ & $1$\\
+  $h$, $T^\ast$ ($24\times$ cells/cycle)  & $0.500$ & $0.276$ & $0.176$ & $0.108$ & $0.068$ & $0.039$\\
+  $q_{\min}$, $T^\ast$                    & $0.667$ & $0.298$ & $0.075$ & $0.022$ & $0.006$ & $0.002$\\
+  \bottomrule
+  \end{tabular}
+  \end{center}
+  Cells do shrink (finite edge lifetime, $\alpha\approx0.18$), but the
+  minimal quality falls by a factor of about $3$--$4$ per cycle, so (G2)
+  fails.
+\end{itemize}
+
+\subsection{Conclusions and open questions}
+
+\begin{enumerate}
+\item The face scheme is a correct stellar subdivision scheme, and so is
+  the whole admissible typed-cycle family. The combinatorics of
+  compatibility do not care whether the split simplex is an edge or a
+  face.
+\item Geometrically, pure face schemes are ruled out
+  (\Cref{prop:edges}), and the hybrids we tested degenerate. Edge
+  bisection is therefore needed for the \emph{geometry}, not for
+  compatibility.
+\item Open questions:
+  \begin{itemize}
+  \item longer hybrid cycles (length $\ge5$, several face steps per
+    Maubach cycle);
+  \item placing the face vertex somewhere other than the centroid, which
+    cannot help pure face schemes (\Cref{prop:edges}) but might help
+    hybrids;
+  \item invariants other than (A) and (B).
+  \end{itemize}
+\item For the Riemann-surface application, the practical recommendation
+  is to keep Maubach bisection for refinement and use the $2$-faces in
+  the refinement \emph{criterion}, which is what the code already does.
+\end{enumerate}
+
+\section*{Scripts}
+\texttt{scripts/} (Python 3, NumPy):
+\begin{itemize}
+\item \texttt{facesplit.py}: mesh simulator on the reflected Kuhn torus,
+  with uniform and adaptive refinement.
+\item \texttt{inv.py}: census of the $(\Delta\level,\type,i,j)$ pairs.
+\item \texttt{symbolic.py}: two-cell check for the prefix family, $d\le7$.
+\item \texttt{hybrid.py}: search for admissible edge+face cycles.
+\item \texttt{charac\_rule.py}, \texttt{charac.py}: conditions (C0)--(C2)
+  and their agreement with the exhaustive check.
+\item \texttt{lifetime.py}: edge lifetime.
+\item \texttt{geo.py}, \texttt{geo2.py}, \texttt{screen.py}, \texttt{insert.py},
+  \texttt{traj.py}: geometry on Kuhn's simplex.
+\end{itemize}
+
+\end{document}
