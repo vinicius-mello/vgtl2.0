@@ -200,9 +200,8 @@ dimension with guarantees on the output, in codimension one.
 \paragraph{Certification.}
 Interval and Bernstein subdivision certify the topology of implicit
 curves and surfaces~\cite{plantingavegter2004,mourrainpavone2009};
-barycentric Bernstein bounds on simplices~\cite{reuter2008} are the
-basis of the enclosure of \Cref{sec:bernstein}. Our method is not
-certified: it reports the cells where extraction fails and checks the
+on simplices, barycentric Bernstein bounds play the same
+role~\cite{reuter2008}. Our method is not certified: it reports the cells where extraction fails and checks the
 topology of the result a posteriori.
 
 \paragraph{Bisection and initial meshes.}
@@ -687,28 +686,6 @@ curvature or a near-tangency. With geodesic faces, the remaining failures
 occur at near-tangencies (\Cref{sec:exp-badrate}). A bad cell contributes no polygon and leaves a
 hole in the output.
 
-\subsection{Bernstein enclosure}
-\label{sec:bernstein}
-
-With chart-flat faces, an optional test bounds $F$ on a $2$-face before
-running Newton. In the face's chart, $F$ restricted to the flat triangle
-is a polynomial of degree $n$ in the barycentric coordinates. Its coefficients in the
-Bernstein basis enclose the real and imaginary parts of $F$ on the
-triangle~\cite{reuter2008}, and the enclosure can be tightened by
-subdividing the triangle. If $0$ lies outside the enclosure of
-$\mathrm{Re}\,F$ or of $\mathrm{Im}\,F$, the face has no crossing and
-Newton is skipped. If Newton finds no root on a face whose enclosure
-contains $0$, subdivision is followed down to a subtriangle whose
-enclosure still contains $0$, and its centroid is used as a further
-Newton seed. Enclosures are cached per face.
-
-The enclosure guarantees that a skipped face has no crossing, up to
-floating-point rounding of the Bernstein coefficients. It does not
-certify the crossings that are found, nor the topology of the output.
-On geodesic faces, $F\circ v$ is not a polynomial, and the analogous test
-would need interval arithmetic. \todo{decide whether to keep this
-subsection (decision D3) now that it applies only to chart-flat faces.}
-
 \subsection{Continuation}
 
 Starting from one seed cell that meets $C$, a frontier of cells is
@@ -1080,13 +1057,6 @@ needed $4$--$5$\,GB around depth $18$; the pointerless mesh needs
 $0.87$\,GB at depth $20$.
 
 
-\subsection{Bernstein enclosure}
-\label{sec:exp-bernstein}
-
-\todo{E6: \texttt{--bernstein} against the default, depths $14$--$20$,
-elliptic and quartic, with and without tangency threshold and repair
-rounds: bad-cell rate, leaves, time, memory.}
-
 \subsection{Comparison with an affine chart}
 \label{sec:exp-affine}
 
@@ -1196,7 +1166,16 @@ The method has clear limits.
   $2$-face of $c$. A reducible curve needs one starting cell per
   component.
 \end{itemize}
-Open directions are the certification of the extraction, curves of high
+The most natural next step is certification. A per-cell test in the
+spirit of Plantinga and Vegter, adapted to codimension two, can use a
+single complex condition: that an enclosure of
+$\langle\nabla F(x),\nabla F(x_0)\rangle$ over the cell, with $x_0$ its
+center, excludes $0$. With the implicit function theorem and the
+Noshiro--Warschawski theorem, this makes $C\cap c$ the graph of a
+holomorphic function over a complex line. On geodesic faces $F$ is no longer a
+polynomial in the face coordinates, so the enclosures must come from
+interval arithmetic rather than Bernstein coefficients. Other open
+directions are curves of high
 degree, and other closed manifolds that admit small balanced seeds.
 
 \section*{Note on AI assistance}

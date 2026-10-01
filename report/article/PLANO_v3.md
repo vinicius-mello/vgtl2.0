@@ -109,10 +109,10 @@ Implementação: opções `--seed box:R` e `--midpoint affine` no `riemann_cp2_g
 
   É a única peça nova do lado da malha, e a introdução deve listá-la entre as contribuições.
 - **D2 (decidido 2026-10-01). Ênfase em E1**: a comparação com a abordagem por carta afim é o experimento principal, e E4 fica secundário. O público é de geometria computacional / computação gráfica (C&G, CAGD, SMI, CGF); o veículo exato ainda não foi escolhido.
-- **D3 (decidido 2026-10-01, provisório). `--bernstein` fica.** Entra na seção 5 como envoltória certificada de Bernstein–Bézier por 2-face (citar Reuter et al. 2008 e Mourrain–Pavone 2009). Na narrativa, ela certifica a *exclusão* de 2-faces sem cruzamento, mas não a topologia. Precisa do experimento E6.
+- **D3 (revisto 2026-10-01). `--bernstein` sai do artigo**: só funciona com faces planas na carta, que deixaram de ser o padrão; a certificação por aritmética intervalar nas faces geodésicas vira trabalho futuro. (Decisão anterior: `--bernstein` fica, com o experimento E6.)
 - **D4 (decidido 2026-10-01). A teoria é arquivada para outro momento**, na tag `article-v2` e em `article_v2.pdf`. Na v3 ela não aparece nem como trabalho futuro. A nota `report/face_scheme/` fica como registro.
 
-**E6 (novo, por causa do D3).** No `riemann_cp2_glpt`, comparar `--bernstein` com o modo padrão:
+**E6 (cancelado com a revisão do D3).** No `riemann_cp2_glpt`, comparar `--bernstein` com o modo padrão:
 - taxa de células ruins, folhas, tempo e memória;
 - profundidades 14–20, com e sem tangência e reparo;
 - curvas elíptica e quártica.
