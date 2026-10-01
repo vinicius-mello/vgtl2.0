@@ -1,20 +1,23 @@
 #!/bin/bash
 # Regenerates every figure of the article from scratch.
-#   Figure 1: fig_seed_crossing.py (needs matplotlib)
-#   Figure 2: riemann_cp2_glpt --close, then Blender (views chosen
-#             interactively, recorded below as CAMERA=x,y,z,rx,ry,rz,ortho)
-#   Figure 3: badrate_sweep.sh + fig_badrate.py
+#   seed_crossing.pdf: fig_seed_crossing.py (needs matplotlib)
+#   faces.pdf:         fig_faces.py (needs matplotlib)
+#   elliptic_flat.png, quartic_alpha.png: riemann_cp2_glpt --close, then
+#             Blender (views chosen interactively, recorded below as
+#             CAMERA=x,y,z,rx,ry,rz,ortho)
+#   badrate.pdf:       badrate_sweep.sh + fig_badrate.py
 #   Tables:   causes_sweep.sh, genus_sweep.sh, rotation_sweep.sh, modes_table.sh,
 #             continuation_check.sh, cost_sweep.sh, area_sweep.sh, affine_sweep.sh
 # (badrate_chartflat.csv / rotations_chartflat.csv keep the measurements
 #  made with the old chart-flat faces, before geodesic faces became default.)
-# Also prints the genus check of both Figure-2 meshes.
+# Also prints the genus check of both rendered meshes.
 set -e
 cd "$(dirname "$0")"
 P=../../../examples/top/riemann_cp2_glpt/riemann_cp2_glpt
 PY=${PYTHON:-python3}
 
 $PY fig_seed_crossing.py
+$PY fig_faces.py
 
 $P --function 5 --generic --depth 18 --tangency-threshold 0.05 --repair-rounds 2 \
    --chart 2 --flat-swap --cutoff 8 --close --obj elliptic_flat.obj | sed -n '/--- genus check/,$p'
