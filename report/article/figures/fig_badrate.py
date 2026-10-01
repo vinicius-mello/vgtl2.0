@@ -33,16 +33,16 @@ for name, label, color, marker in curves:
                 mfc=fill, mec=color, mew=1.2, zorder=3)
     pts = sorted(data[(name, "combined")])
     if pts:  # direct label at the last point of the solid line
-        dy = {"conic": 4, "elliptic": -4}.get(name, 0)
+        dy = {"fermat_quartic": 6, "fermat_cubic": -6}.get(name, 0)
         ax.annotate(label, pts[-1], xytext=(7, dy), textcoords="offset points",
                     va="center", fontsize=8, color="0.15")
 
 ax.set_yscale("log")
 from matplotlib.ticker import FixedLocator, FuncFormatter, NullFormatter
-ax.yaxis.set_major_locator(FixedLocator([0.2, 0.5, 1, 2, 5, 10, 20, 50]))
+ax.yaxis.set_major_locator(FixedLocator([0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1]))
 ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{v:g}"))
 ax.yaxis.set_minor_formatter(NullFormatter())
-ax.set_ylim(0.3, 45)
+ax.set_ylim(0.004, 1.3)
 ax.set_xlabel("refinement depth")
 ax.set_ylabel("bad cells (% of touched cells)")
 depths = sorted({d for v in data.values() for d, _ in v})

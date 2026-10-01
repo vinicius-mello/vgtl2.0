@@ -18,28 +18,11 @@ E.~L. Allgower and P.~H. Schmidt.
   defined manifold.
 \newblock {\em SIAM J. Numer. Anal.}, 22(2):322--346, 1985.
 
-\bibitem{amp2000}
-D.~N. Arnold, A.~Mukherjee, and L.~Pouly.
-\newblock Locally adapted tetrahedral meshes using bisection.
-\newblock {\em SIAM J. Sci. Comput.}, 22(2):431--448, 2000.
-
 \bibitem{atalaymount2007}
 F.~B. Atalay and D.~M. Mount.
 \newblock Pointerless implementation of hierarchical simplicial meshes and
   efficient neighbor finding in arbitrary dimensions.
 \newblock {\em Internat. J. Comput. Geom. Appl.}, 17(6):595--631, 2007.
-
-\bibitem{bansch1991}
-E.~B{\"a}nsch.
-\newblock Local mesh refinement in 2 and 3 dimensions.
-\newblock {\em IMPACT Comput. Sci. Engrg.}, 3(3):181--191, 1991.
-
-\bibitem{belda2018}
-G.~Belda-Ferr{\'\i}n, A.~Gargallo-Peir{\'o}, and X.~Roca.
-\newblock Local bisection for conformal refinement of unstructured 4d
-  simplicial meshes.
-\newblock In {\em Proc. 27th International Meshing Roundtable}, pages 229--247.
-  Springer, 2018.
 
 \bibitem{belda2023}
 G.~Belda-Ferr{\'\i}n, E.~Ruiz-Giron{\'e}s, A.~Gargallo-Peir{\'o}, and X.~Roca.
@@ -48,17 +31,10 @@ G.~Belda-Ferr{\'\i}n, E.~Ruiz-Giron{\'e}s, A.~Gargallo-Peir{\'o}, and X.~Roca.
 \newblock {\em Computer-Aided Design}, 154:103419, 2023.
 \newblock verify volume.
 
-\bibitem{belda2022}
-G.~Belda-Ferr{\'\i}n, E.~Ruiz-Giron{\'e}s, and X.~Roca.
-\newblock Bisecting with optimal similarity bound on 3d unstructured conformal
-  meshes.
-\newblock In {\em Proc. SIAM International Meshing Roundtable}, pages 86--97,
-  2022.
-
-\bibitem{bdd2004}
-P.~Binev, W.~Dahmen, and R.~DeVore.
-\newblock Adaptive finite element methods with convergence rates.
-\newblock {\em Numer. Math.}, 97(2):219--268, 2004.
+\bibitem{bwc2004}
+P.~Bhaniramka, R.~Wenger, and R.~Crawfis.
+\newblock Isosurface construction in any dimension using convex hulls.
+\newblock {\em IEEE Trans. Vis. Comput. Graph.}, 10(2):130--141, 2004.
 
 \bibitem{bobenkoklein2013}
 A.~I. Bobenko and C.~Klein, editors.
@@ -79,6 +55,13 @@ J.-D. Boissonnat and M.~Wintraecken.
 \newblock {\em Found. Comput. Math.}, 22:967--1012, 2022.
 \newblock verify pages.
 
+\bibitem{bertinireal2017}
+D.~A. Brake, D.~J. Bates, W.~Hao, J.~D. Hauenstein, A.~J. Sommese, and C.~W.
+  Wampler.
+\newblock Algorithm 976: {Bertini\_real}: numerical decomposition of real
+  algebraic curves and surfaces.
+\newblock {\em ACM Trans. Math. Softw.}, 44(1), 2017.
+
 \bibitem{bursteddeholke2016}
 C.~Burstedde and J.~Holke.
 \newblock A tetrahedral space-filling curve for nonconforming adaptive meshes.
@@ -89,6 +72,11 @@ C.~Burstedde, L.~C. Wilcox, and O.~Ghattas.
 \newblock p4est: scalable algorithms for parallel adaptive mesh refinement on
   forests of octrees.
 \newblock {\em SIAM J. Sci. Comput.}, 33(3):1103--1133, 2011.
+
+\bibitem{castelo2006}
+A.~Castelo, L.~G. Nonato, M.~Siqueira, R.~Minghim, and G.~Tavares.
+\newblock The {J1a} triangulation: an adaptive triangulation in any dimension.
+\newblock {\em Computers \& Graphics}, 30(5):737--753, 2006.
 
 \bibitem{deconinckvanhoeij2001}
 B.~Deconinck and M.~van Hoeij.
@@ -134,21 +122,31 @@ A.~A. Gaifullin.
   colouring of four-dimensional simplices.
 \newblock {\em Proc. Steklov Inst. Math.}, 266:29--48, 2009.
 
+\bibitem{gerstnerrumpf2000}
+T.~Gerstner and M.~Rumpf.
+\newblock Multiresolutional parallel isosurface extraction based on tetrahedral
+  bisection.
+\newblock In {\em Volume Graphics}. Springer, 2000.
+
+\bibitem{griffithsharris1978}
+Phillip Griffiths and Joseph Harris.
+\newblock {\em Principles of Algebraic Geometry}.
+\newblock Wiley, New York, 1978.
+
+\bibitem{hanson1994}
+A.~J. Hanson.
+\newblock A construction for computer visualization of certain complex curves.
+\newblock {\em Notices Amer. Math. Soc.}, 41(9):1156--1163, 1994.
+
 \bibitem{hebert1994}
 D.~J. Hebert.
 \newblock Symbolic local refinement of tetrahedral grids.
 \newblock {\em J. Symbolic Comput.}, 17(5):457--472, 1994.
 
-\bibitem{ikn2017}
-I.~Izmestiev, S.~Klee, and I.~Novik.
-\newblock Simplicial moves on balanced complexes.
-\newblock {\em Adv. Math.}, 320:82--114, 2017.
-
-\bibitem{joswig2002}
-M.~Joswig.
-\newblock Projectivities in simplicial complexes and colorings of simple
-  polytopes.
-\newblock {\em Math. Z.}, 240(2):243--259, 2002.
+\bibitem{ju2024}
+Y.~Ju, X.~Du, Q.~Zhou, N.~Carr, and T.~Ju.
+\newblock Adaptive grid generation for discretizing implicit complexes.
+\newblock {\em ACM Trans. Graph.}, 43(4), 2024.
 
 \bibitem{kossaczky1994}
 I.~Kossaczk{\'y}.
@@ -170,12 +168,6 @@ W.~K{\"u}hnel and T.~F. Banchoff.
 M.~Lee, L.~De Floriani, and H.~Samet.
 \newblock Constant-time neighbor finding in hierarchical tetrahedral meshes.
 \newblock In {\em Proc. Shape Modeling International}, pages 286--295, 2001.
-
-\bibitem{lickorish1999}
-W.~B.~R. Lickorish.
-\newblock Simplicial moves on complexes and manifolds.
-\newblock In {\em Proceedings of the Kirbyfest}, volume~2 of {\em Geom. Topol.
-  Monogr.}, pages 299--320. Geom. Topol. Publ., 1999.
 
 \bibitem{maubach1995}
 J.~M. Maubach.
@@ -202,13 +194,6 @@ Vin{\'\i}cius Mello.
   complexes.
 \newblock \url{https://github.com/vinicius-mello/vgtl2.0}, 2026.
 
-\bibitem{mello2006}
-Vin{\'\i}cius~Moreira Mello.
-\newblock {\em Novos M{\'e}todos Simpliciais em Computa{\c c}{\~a}o
-  Gr{\'a}fica}.
-\newblock PhD thesis, IMPA, 2006.
-\newblock Advisor: Luiz Velho.
-
 \bibitem{mitchell1988}
 W.~F. Mitchell.
 \newblock {\em Unified Multilevel Adaptive Finite Element Methods for Elliptic
@@ -221,6 +206,11 @@ W.~F. Mitchell.
   hierarchical bases.
 \newblock {\em J. Comput. Appl. Math.}, 36(1):65--78, 1991.
 
+\bibitem{mourrainpavone2009}
+B.~Mourrain and J.-P. Pavone.
+\newblock Subdivision methods for solving polynomial equations.
+\newblock {\em J. Symbolic Comput.}, 44(3):292--306, 2009.
+
 \bibitem{nieser2010}
 M.~Nieser, K.~Poelke, and K.~Polthier.
 \newblock Automatic generation of {Riemann} surface meshes.
@@ -228,17 +218,25 @@ M.~Nieser, K.~Poelke, and K.~Polthier.
   volume 6130 of {\em LNCS}, pages 161--178, 2010.
 \newblock verify pages.
 
-\bibitem{rivara1984}
-M.-C. Rivara.
-\newblock Mesh refinement processes based on the generalized bisection of
-  simplices.
-\newblock {\em SIAM J. Numer. Anal.}, 21(3):604--613, 1984.
+\bibitem{pascucci2002}
+V.~Pascucci.
+\newblock Slow growing subdivision ({SGS}) in any dimension: towards removing
+  the curse of dimensionality.
+\newblock In {\em Comput. Graph. Forum (Proc. Eurographics 2002)}, volume~21,
+  2002.
 
-\bibitem{rivara1991}
-M.-C. Rivara.
-\newblock Local modification of meshes for adaptive and/or multigrid
-  finite-element methods.
-\newblock {\em J. Comput. Appl. Math.}, 36(1):79--89, 1991.
+\bibitem{plantingavegter2004}
+S.~Plantinga and G.~Vegter.
+\newblock Isotopic approximation of implicit curves and surfaces.
+\newblock In {\em Proc. Symposium on Geometry Processing}, pages 245--254,
+  2004.
+
+\bibitem{reuter2008}
+M.~Reuter, T.~S. Mikkelsen, E.~C. Sherbrooke, T.~Maekawa, and N.~M.
+  Patrikalakis.
+\newblock Solving nonlinear polynomial systems in the barycentric {Bernstein}
+  basis.
+\newblock {\em The Visual Computer}, 24:187--200, 2008.
 
 \bibitem{stevenson2008}
 R.~Stevenson.
@@ -250,24 +248,6 @@ R.~Stevenson.
 C.~T. Traxler.
 \newblock An algorithm for adaptive mesh refinement in $n$ dimensions.
 \newblock {\em Computing}, 59(2):115--137, 1997.
-
-\bibitem{velho2003}
-L.~Velho.
-\newblock Stellar subdivision grammars.
-\newblock In {\em Proc. Eurographics/ACM SIGGRAPH Symposium on Geometry
-  Processing}, pages 188--199, 2003.
-\newblock verify pages.
-
-\bibitem{velhozorin2001}
-L.~Velho and D.~Zorin.
-\newblock 4--8 subdivision.
-\newblock {\em Comput. Aided Geom. Design}, 18(5):397--427, 2001.
-
-\bibitem{venturello2019}
-L.~Venturello.
-\newblock Balanced triangulations on few vertices and an implementation of
-  cross-flips.
-\newblock {\em Electron. J. Combin.}, 26(3):P3.61, 2019.
 
 \bibitem{weiglebanks1996}
 C.~Weigle and D.~C. Banks.

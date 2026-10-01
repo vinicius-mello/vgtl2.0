@@ -42,42 +42,45 @@
 \newcommand{\C}{\mathbb{C}}
 \newcommand{\type}{\mathrm{type}}
 \newcommand{\level}{\mathrm{level}}
-\newcommand{\msplit}{\mathrm{split}}
-\newcommand{\link}{\mathrm{link}}
-\newcommand{\weld}{\mathrm{weld}}
-\newcommand{\st}{\mathrm{st}}
-\newcommand{\col}{\mathfrak{c}}
 \newcommand{\adj}{\mathrm{adj}}
+\newcommand{\col}{\mathfrak{c}}
+\newcommand{\area}{\mathrm{area}}
+% Draft markers for the v3 skeleton; remove before submission.
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO:} #1\textbf{]}}}
 \setlength{\emergencystretch}{2em}
 
-\title{\bf Stellar Subdivision Schemes and Pointerless\\ Maubach Bisection on Balanced Seeds}
+\title{\bf Triangulating Plane Algebraic Curves\\ Intrinsically in $\CP^2$}
 \author{Vin\'icius Moreira Mello\\[2pt]
 {\small Departamento de Matem\'atica, Universidade Federal da Bahia, Salvador, Brazil}\\
 {\small\texttt{vinicius.mello@ufba.br}}}
-\date{Draft -- \today}
+\date{Draft v3 -- \today}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-We give a self-contained combinatorial account of Maubach's newest-vertex
-bisection as a \emph{stellar subdivision scheme}: an invariant on ordered
-simplicial meshes that holds at every level of the hierarchy, together
-with a subdivision algorithm that provably preserves it. We then turn to
-the initial mesh. Strong compatibility of a seed is equivalent to the
-seed being balanced, i.e.\ properly $(d{+}1)$-colorable, a fact implicit
-in Traxler's work and in recent coloring-based initializations. We use
-it to connect bisection with the classes of triangulations of closed
-manifolds studied by Dynnikov, Novikov and Gaifullin. In particular,
-Gaifullin's 15-vertex triangulation of $\CP^2$ is a strongly compatible
-seed with the fewest possible vertices. Balance is also what makes Atalay
-and Mount's pointerless LPT codes portable beyond the cube. On a balanced
-seed, a precomputed table plus one integer comparison decides whether a
-facet lies on the seed boundary, and the neighbor across it carries the
-same code in the adjacent seed cell. This yields a conforming, graded,
-pointerless Maubach bisection over any balanced seed, with no floating
-point. As an example, we triangulate smooth plane curves intrinsically
-inside $\CP^2$.
+A smooth plane algebraic curve is a compact Riemann surface and a real
+surface of codimension $2$ in $\CP^2$. Most methods that mesh it work in
+an affine chart or over a branched covering of $\CP^1$, and must
+therefore treat points at infinity, charts or branch cuts separately. We
+triangulate the curve directly inside $\CP^2$. A balanced $15$-vertex
+triangulation of $\CP^2$, due to Gaifullin, is refined adaptively by
+Maubach bisection along Fubini--Study geodesics. The curve is followed
+from cell to cell by a continuation that uses only combinatorial
+neighbor queries, and its intersection with each cell is extracted from
+Newton crossings on triangular $2$-faces. The mesh is pointerless: we
+extend Atalay and Mount's LPT codes from the cube to any balanced seed,
+with a table-driven, floating-point-free neighbor procedure. The output
+is not certified, but its topology is checked a posteriori. Holes left by
+failed cells are closed, and the resulting surface is verified to be
+closed and connected, with Euler characteristic $2-2g$.
+Realizing every triangular face as a Fubini--Study geodesic cone makes
+faces glue exactly; on our test curves, fewer than $0.14\%$ of the cells
+that meet the curve then fail at depth $14$, against $1.8$--$11.6\%$ with
+faces that are flat in affine charts, and the area of the result agrees
+with Wirtinger's theorem to within $0.15\%$.
+\todo{one sentence with the headline numbers of the affine-chart
+comparison (E1).}
 \end{abstract}
 
 \tableofcontents
@@ -87,89 +90,75 @@ inside $\CP^2$.
 \label{sec:intro}
 % =====================================================================
 
-Newest-vertex bisection in the form given by Maubach~\cite{maubach1995}
-and Traxler~\cite{traxler1997} is the standard way to refine simplicial
-meshes locally in arbitrary dimension $d$. Its refinement decisions depend
-only on combinatorial data: a vertex order in each cell and the cell's
-level in the hierarchy. It keeps meshes conforming, produces finitely
-many similarity classes when new vertices are placed at
-midpoints~\cite{maubach1995,amp2000}, and satisfies the closure estimates
-behind optimal adaptive finite elements~\cite{bdd2004,stevenson2008}. Its
-well-known weakness is the initial mesh. The vertex orders of the
-initial cells must be \emph{compatible}, and for $d\ge3$ not every mesh
-admits compatible orders. A substantial literature addresses how to
-repair this~\cite{kossaczky1994,stevenson2008,agk2018,belda2023,dgs2025}.
+Let $F(X,Y,Z)$ be a homogeneous polynomial of degree $n$ such that
+$C=\{F=0\}\subset\CP^2$ is smooth. Then $C$ is a compact Riemann surface of
+genus $g=(n-1)(n-2)/2$, and, as a real object, a closed orientable surface
+of codimension $2$ in the real $4$-manifold $\CP^2$. This paper is about
+computing a triangulation of $C$, a simplicial surface close to $C$ with
+the right topology, for visualization and as a combinatorial model.
 
-This paper studies Maubach bisection from a purely combinatorial
-standpoint, with two goals in mind: to state and prove its correctness
-through local stellar operations alone, and to run it pointerlessly on
-seeds more general than the Kuhn cube. The original motivation was
-geometric: to triangulate curves inside $\CP^2$, whose natural
-triangulations are neither cubes nor domains in $\R^d$.
-
-\paragraph{Stellar subdivision schemes (\Cref{sec:stellar,sec:maubach}).}
-Following the author's thesis~\cite{mello2006}, a \emph{subdivision
-scheme} is an invariant on ordered simplicial meshes together with an
-algorithm that propagates ordered stellar subdivisions until a requested
-cell can be split without violating the invariant. We give complete
-proofs for two schemes, Mitchell's (split a facet) and Maubach's (split
-an edge), which share the same three-lemma structure. For Maubach's
-scheme, the invariant is \emph{hereditary}: it holds at every level, not
-only on the initial mesh as in the conditions of Traxler and Stevenson.
-We prove one direction of its relation to Stevenson's matching condition.
-
-\paragraph{Balanced seeds (\Cref{sec:initial}).}
-On a conforming mesh, strong compatibility (every shared facet sits at the
-same local index on both sides) is equivalent to the mesh being
-\emph{balanced}. This equivalence is implicit in Traxler's
-work~\cite{traxler1997} and explicit, in the language of vertex colorings,
-in the recent initialization of Diening, Gehring and Storn~\cite{dgs2025};
-we include a short proof. Our contribution is to connect it with the
-classes of triangulations of closed manifolds studied by Dynnikov and
-Novikov and by Gaifullin~\cite{gaifullin2009}, which the bisection
-literature does not consider. For simply connected manifolds these
-classes coincide, so a seed is strongly compatible if and only if every
-codimension-2 face has even degree. Gaifullin proved that his 15-vertex
-triangulation of $\CP^2$ is vertex-minimal among balanced triangulations
-of $\CP^2$. It follows that it is a strongly compatible seed of $\CP^2$ with
-the fewest possible vertices. Kühnel's 9-vertex $\CP^2_9$ is not
-balanced.
-
-\paragraph{Pointerless codes on balanced seeds (\Cref{sec:lpt}).}
-Atalay and Mount's LPT codes~\cite{atalaymount2007} represent a Maubach
-hierarchy over a Kuhn-triangulated cube with no pointers. The geometry
-and the neighbors of a cell are computed from a small integer code. We
-show that balance is all that is needed to use these codes over an
-arbitrary seed:
+Existing methods each treat some part of $C$ specially.
 \begin{itemize}[itemsep=1pt]
-\item whether a facet lies on the seed boundary is decided by a table
-  indexed by the code's level, signed permutation and facet, followed by
-  one comparison of orthant coordinates (\Cref{prop:boundary-test});
-\item the neighbor across a seed-boundary facet is the same code in the
-  adjacent seed cell (\Cref{prop:crossing}).
+\item \emph{Affine charts.} Meshing $\{F(x,y,1)=0\}$ in a grid of
+  $\C^2=\R^4$~\cite{weiglebanks1996} loses the $n$ points at infinity, and
+  in a bounded box it loses a neighborhood of them. Covering $\CP^2$ needs
+  three charts, whose meshes must then be stitched along the overlaps.
+\item \emph{Branched coverings.} Viewing $C$ as an $n$-sheeted covering of
+  $\CP^1$~\cite{deconinckvanhoeij2001,nieser2010} requires the branch
+  points, cuts between them, and a separate treatment of the fiber over
+  $\infty$.
+\item \emph{Other compactifications.} Embedding $\C^2$ in
+  $\CP^1\times\CP^1$ instead of $\CP^2$ can create singularities that the
+  curve does not have: the closure of $w^2=z^3-z$ has a cusp at
+  $(\infty,\infty)$ in $\CP^1\times\CP^1$, while its closure
+  $X^2Z=Y^3-YZ^2$ in $\CP^2$ is smooth (\Cref{sec:exp-s2s2}).
 \end{itemize}
-Every neighbor query is therefore resolved combinatorially. We verify the
-resulting procedure exactly on five million queries, and compare its
-memory use with that of explicit incidence structures.
+In $\CP^2$ the smooth curve is a smooth compact submanifold, with no
+distinguished points. A method that works intrinsically in $\CP^2$ needs
+none of these special cases.
 
-\paragraph{Example (\Cref{sec:example}).}
-We triangulate smooth plane curves directly inside $\CP^2$. The seed is
-Gaifullin's triangulation, refinement is pointerless Maubach bisection
-along Fubini--Study geodesics, and the curve is followed by a
-continuation driven only by combinatorial neighbor queries.
+\paragraph{Approach.}
+We triangulate $\CP^2$ itself and refine it adaptively around $C$.
+\begin{itemize}[itemsep=1pt]
+\item The seed is Gaifullin's $15$-vertex triangulation of
+  $\CP^2$~\cite{gaifullin2009}. It is balanced, and therefore a valid
+  initial mesh for Maubach bisection (\Cref{sec:mesh}).
+\item Refinement is Maubach bisection~\cite{maubach1995,traxler1997},
+  with new vertices at Fubini--Study geodesic midpoints.
+\item The mesh is pointerless: a cell is a seed index plus an LPT
+  code~\cite{atalaymount2007}, and neighbors are computed, not stored
+  (\Cref{sec:lpt}).
+\item The curve is followed by continuation and extracted cell by cell
+  from Newton crossings on triangular $2$-faces, each realized as a
+  geodesic cone so that faces glue exactly along their edges
+  (\Cref{sec:extraction}).
+\item The topology of the result is checked, and holes are closed
+  (\Cref{sec:topology}).
+\end{itemize}
 
 \paragraph{Contributions.}
 \begin{enumerate}[itemsep=2pt]
-\item Complete, self-contained proofs of correctness for the Mitchell and
-  Maubach stellar subdivision schemes, with a hereditary invariant, and
-  one direction of its relation to Stevenson's matching condition.
-\item The connection between strongly compatible seeds and the classes of
-  balanced, chess-colorable and even triangulations of closed manifolds.
-  As a consequence, Gaifullin's triangulation is a vertex-minimal strongly
-  compatible seed of $\CP^2$.
-\item An extension of LPT codes to arbitrary balanced seeds with a fully
-  combinatorial neighbor procedure, an exact verification, and a
-  memory comparison with explicit incidence structures.
+\item An intrinsic pipeline that triangulates smooth plane curves inside
+  $\CP^2$, with no charts, cuts or special treatment of infinity, built
+  from Maubach bisection on a balanced seed of $\CP^2$, codimension-$2$
+  extraction and combinatorial continuation.
+\item An extension of LPT codes from the Kuhn cube to arbitrary balanced
+  seeds, including seeds that triangulate closed manifolds. The neighbor
+  procedure is fully combinatorial and table-driven, and it is verified
+  exactly. We also compare its memory use with an explicit incidence
+  structure.
+\item A chart-free realization of the triangular faces as Fubini--Study
+  geodesic cones. Faces then glue exactly along geodesic edges, so the
+  boundary of every tetrahedral facet is a closed surface and meets $C$ an
+  even number of times. Compared with faces that are flat in affine
+  charts, this cuts extraction failures by a factor of $26$ to $180$ on our
+  test curves.
+\item An a-posteriori topological check and a closing step that turn an
+  uncertified extraction into a closed surface of the right Euler
+  characteristic, together with a global accuracy check by Wirtinger's
+  theorem.
+\item An experimental comparison with the affine-chart approach on the
+  same code base. \todo{state outcome once E1 is done.}
 \end{enumerate}
 
 % =====================================================================
@@ -177,57 +166,56 @@ continuation driven only by combinatorial neighbor queries.
 \label{sec:related}
 % =====================================================================
 
-\paragraph{Bisection and initial meshes.}
-Longest-edge bisection goes back to Rivara~\cite{rivara1984,rivara1991}.
-Newest-vertex bisection was introduced in 2D by
-Mitchell~\cite{mitchell1988,mitchell1991}, extended to 3D by
-Bänsch~\cite{bansch1991} and Kossaczký~\cite{kossaczky1994}, and to
-arbitrary dimension by Maubach~\cite{maubach1995} and
-Traxler~\cite{traxler1997}. Arnold, Mukherjee and Pouly~\cite{amp2000}
-gave a marked variant for tetrahedra that accepts any initial mesh.
-Binev, Dahmen and DeVore~\cite{bdd2004} and Stevenson~\cite{stevenson2008}
-proved the closure estimates behind the optimality of adaptive finite
-elements. All of these methods constrain the initial mesh:
-\begin{itemize}[itemsep=1pt]
-\item Traxler's \emph{reflected} condition requires the ordered vertex
-  lists of neighbors to differ in exactly one position; on a simply
-  connected domain it holds iff every interior $(d{-}2)$-face has even
-  degree~\cite{traxler1997}.
-\item Stevenson's weaker \emph{matching-neighbour} condition is necessary
-  and sufficient for all uniform refinements to be conforming. Whether
-  every 3D mesh admits it is open; following Kossaczký, Stevenson
-  pre-refines every simplex into $\frac12(d{+}1)!$
-  pieces~\cite{stevenson2008}.
-\item Alkämper, Gaspoz and Klöfkorn~\cite{agk2018} give an $O(n)$
-  renumbering that guarantees termination.
-\item Belda-Ferrín et al.~\cite{belda2018,belda2022,belda2023} perform $d$
-  marked-bisection stages before switching to Maubach.
-\item Diening, Gehring and Storn~\cite{dgs2025} initialize Maubach's
-  routine from a proper $(N{+}1)$-coloring of the vertices, $N\ge d$,
-  computed greedily in linear time, and prove shape regularity and the
-  closure estimate. For $N=d$ their condition is Traxler's.
-\end{itemize}
-All of the above concern triangulations of domains in $\R^d$. We add the
-hereditary formulation of the invariant, and seeds that triangulate
-closed manifolds.
+\paragraph{Computing with compact Riemann surfaces.}
+Algebraic curves are usually handled numerically as branched coverings
+of $\CP^1$, to compute monodromy, periods and related invariants~\cite{deconinckvanhoeij2001,bobenkoklein2013}.
+Visualizations project the curve into a chart: Hanson's Fermat
+surfaces~\cite{hanson1994} use an explicit parametrization;
+Nieser, Poelke and Polthier~\cite{nieser2010} mesh the multivalued graph
+over $\C$ from the branch points; Kranich~\cite{kranich2016} colors
+domains on the GPU; and Dutter's chart-free map~\cite{dutter2026}
+displays the whole of $\CP^2$ in a bounded region of $\R^3$.
+Bertini\_real~\cite{bertinireal2017} computes, by homotopy continuation,
+a cell decomposition of the real points of a complex algebraic set of
+dimension one or two. Writing $F=0$ as the two real equations
+$\mathrm{Re}\,F=\mathrm{Im}\,F=0$ in an affine chart makes the curve a real
+surface in $\R^4$ to which it applies, but in one chart at a time.
 
-\paragraph{Balanced and chess-colorable triangulations.}
-A $d$-complex is \emph{balanced} if its graph is $(d{+}1)$-colorable.
-Joswig~\cite{joswig2002} characterized balanced complexes through their
-group of projectivities. Dynnikov and Novikov studied triangulations with
-regular vertex colorings, chess colorings of top simplices, and even
-codimension-2 degrees in connection with discrete connections and
-discrete complex analysis; Gaifullin~\cite[\S2]{gaifullin2009} summarizes
-the relations between these classes and constructs a vertex-minimal
-balanced triangulation of $\CP^2$. Izmestiev, Klee and
-Novik~\cite{ikn2017} introduced cross-flips, the balanced analogue of
-bistellar moves, and Venturello~\cite{venturello2019} found small
-balanced triangulations of several manifolds. Stellar operations go back
-to Alexander and Newman~\cite{lickorish1999}; in geometry processing,
-Velho's stellar subdivision grammars~\cite{velho2003} and
-$4$--$8$ meshes~\cite{velhozorin2001} describe adaptive surface refinement
-by stellar operations, and $4$--$8$ refinement is newest-vertex bisection
-in two dimensions.
+\paragraph{Implicit manifolds of codimension two.}
+Our extraction relates to piecewise-linear approximation of implicit
+manifolds over Freudenthal--Kuhn
+triangulations~\cite{allgowerschmidt1985,allgowergeorg2003}, to its
+certified, uniform-grid variant by cell-to-cell
+tracing~\cite{bkw2023,boissonnatwintraecken2022}, and most directly to
+the extraction of zero sets of functions $\C^2\to\C$ on uniform grids of
+$\R^4$~\cite{weiglebanks1996}, which is the baseline of
+\Cref{sec:exp-affine}. Isosurface extraction over bisection hierarchies
+is common in codimension one~\cite{gerstnerrumpf2000,pascucci2002};
+adaptive simplicial grids for implicit complexes in $\R^3$, including
+curve networks, are recent~\cite{ju2024}. Castelo et al.~\cite{castelo2006} triangulate implicit
+manifolds adaptively in any dimension with the J1a triangulation, and
+Bhaniramka, Wenger and Crawfis~\cite{bwc2004} extract isosurfaces in any
+dimension with guarantees on the output, in codimension one.
+
+\paragraph{Certification.}
+Interval and Bernstein subdivision certify the topology of implicit
+curves and surfaces~\cite{plantingavegter2004,mourrainpavone2009};
+barycentric Bernstein bounds on simplices~\cite{reuter2008} are the
+basis of the enclosure of \Cref{sec:bernstein}. Our method is not
+certified: it reports the cells where extraction fails and checks the
+topology of the result a posteriori.
+
+\paragraph{Bisection and initial meshes.}
+Newest-vertex bisection goes back to Mitchell~\cite{mitchell1988,mitchell1991}
+in 2D, and was extended to arbitrary dimension by
+Maubach~\cite{maubach1995} and Traxler~\cite{traxler1997}. Its weak point
+is the initial mesh, which must carry compatible vertex orders. Remedies
+include pre-refinement~\cite{kossaczky1994,stevenson2008}, renumbering~\cite{agk2018},
+marked-bisection stages~\cite{belda2023}, and the coloring-based
+initialization of Diening, Gehring and Storn~\cite{dgs2025}. All of them
+concern domains in $\R^d$. We use a seed of a closed manifold, which is
+admissible because it is balanced
+(\Cref{prop:balanced}).
 
 \paragraph{Pointerless hierarchical meshes.}
 Several representations encode a simplex of a regular bisection hierarchy
@@ -248,674 +236,86 @@ inter-tree connectivity table. Those forests are non-conforming (hanging
 nodes, red refinement, $d\le3$); ours is a conforming, graded bisection
 forest in arbitrary dimension.
 
-\paragraph{Implicit curves and surfaces.}
-The example of \Cref{sec:example} relates to piecewise-linear
-approximation of implicit manifolds over Freudenthal--Kuhn
-triangulations~\cite{allgowerschmidt1985,allgowergeorg2003}, to its
-certified, uniform-grid variant by cell-to-cell
-tracing~\cite{bkw2023,boissonnatwintraecken2022}, to the extraction of
-zero sets of functions $\C^2\to\C$ on uniform grids of
-$\R^4$~\cite{weiglebanks1996}, and to numerical and visual approaches to
-compact Riemann surfaces through branched coverings and charts~\cite{deconinckvanhoeij2001,bobenkoklein2013,nieser2010,kranich2016}.
-
 % =====================================================================
-\section{Ordered meshes and stellar subdivision schemes}
-\label{sec:stellar}
+\section{Preliminaries}
+\label{sec:prelim}
 % =====================================================================
 
-Adaptive refinement has a geometric side (where new vertices go, how cell
-shapes evolve) and a combinatorial side (which simplex to split next, and
-which additional splits keep the mesh conforming). Newest-vertex
-bisection is attractive precisely because its decisions can be made from
-combinatorial data alone, which makes it usable on meshes whose geometry
-is unusual, such as a triangulation of $\CP^2$ realized with
-Fubini--Study geodesics. This section isolates that combinatorial layer.
-A refinement \emph{scheme} is an invariant on ordered meshes together
-with an algorithm that preserves it; correctness then reduces to checking
-how one stellar operation affects pairs of adjacent cells. We illustrate
-the framework on Mitchell's scheme, whose proof has the same structure as
-Maubach's but fewer cases.
+\subsection{The Fubini--Study geometry of $\CP^2$}
 
-Throughout, $d$ denotes the dimension of the mesh.
-
-\subsection{Ordered simplicial complexes and conforming meshes}
-
-\begin{definition}
-An \emph{ordered simplicial complex} $K$ on a finite vertex set $V$ is an
-abstract simplicial complex with a partial order on $V$ that is total on
-the vertices of every simplex. We write
-$\sigma=\langle v_0,\dots,v_k\rangle$ with $v_0<\dots<v_k$ and
-$\sigma[p]=v_p$. The \emph{face operator} $\partial_i$ deletes the $i$-th
-vertex, and $\sigma[p_0,\dots,p_q]:=\langle v_{p_0},\dots,v_{p_q}\rangle$
-for $p_0<\dots<p_q$.
-\end{definition}
-
-Equalities such as $\partial_i\sigma=\partial_j\omega$ are equalities of
-\emph{ordered} simplices; this will matter in \Cref{rem:index-only}.
-The $d$-simplices of a $d$-complex are its \emph{cells} and its
-$(d{-}1)$-simplices its \emph{facets}. Two cells are \emph{adjacent} if
-they share a facet. $K$ is a \emph{pseudomanifold} if it is pure and
-every facet lies in at most two cells. It is \emph{strongly connected}
-if any two cells are joined by a chain of adjacent cells.
-
-\begin{definition}[\cite{mello2006}]
-A strongly connected pseudomanifold is a \emph{conforming mesh} if the
-star $\st(v,K)$ of every vertex is strongly connected.
-\end{definition}
-
-Every combinatorial manifold of dimension $d\ge2$ is a conforming mesh.
-In a conforming mesh the star of every simplex $\epsilon$ is strongly
-connected. Moreover, two cells of $\st(\epsilon,K)$ that share a facet
-share a facet containing $\epsilon$, since both contain $\epsilon$. Hence
-$\st(\epsilon,K)$ can be traversed by crossing only facets that contain
-$\epsilon$.
-
-\subsection{Ordered stellar subdivisions}
-
-Let $\delta\in K$ and let $v$ be a new vertex. The \emph{stellar
-subdivision} $K(\delta,v)$ replaces $\st(\delta,K)$ by the cone from $v$
-over $\partial\delta\star\link(\delta,K)$. It is an \emph{ordered stellar
-subdivision} $K(\delta,v)_l$ if the new vertex is placed at position $l$
-in every new cell. A cell $\sigma\supseteq\delta$ with
-$\delta=\sigma[p_0,\dots,p_k]$ is replaced by $k+1$ \emph{children}
-$c_0\sigma,\dots,c_k\sigma$, one for each facet of $\delta$; the child
-$c_q\sigma$ is obtained from $\sigma$ by deleting $\sigma[p_{k-q}]$ and
-inserting $v$ at position $l$. Hence
-\begin{equation}\label{eq:children}
-  \partial_l\,c_q\sigma=\partial_{p_{k-q}}\sigma .
-\end{equation}
-A sequence of ordered stellar subdivisions of an initial mesh $K_0$
-induces a hierarchy: $\level(\sigma)=0$ for $\sigma\in K_0$ and
-$\level(c_q\sigma)=\level(\sigma)+1$. A cell of positive level has a
-unique parent, and a unique \emph{weld vertex} $\weld(\sigma)$: the
-vertex inserted by the subdivision that created it.
-
-\subsection{Subdivision schemes}
-
-\begin{definition}[\cite{mello2006}]
-A \emph{stellar subdivision scheme} is a pair $(\mathcal I,\mathrm{Subdivide})$
-where $\mathcal I$ is a set of invariants on conforming meshes, stated in
-terms of vertex order, adjacency and level only, and
-$\mathrm{Subdivide}(K,\sigma)$ applies a finite sequence of ordered stellar
-subdivisions to $K$, the last of which subdivides a face of $\sigma$ (the
-\emph{split face} of $\sigma$), such that every intermediate mesh
-satisfies $\mathcal I$.
-\end{definition}
-
-A basic invariant bounds the level jump across facets:
-\begin{equation}\tag{OneLevel}
-  \partial_i\sigma=\partial_j\omega\;\Longrightarrow\;|\level(\sigma)-\level(\omega)|\le1 .
-\end{equation}
-All invariants below are conditions on \emph{pairs of adjacent cells}.
-To show that a stellar subdivision preserves them, it therefore suffices
-to check the adjacent pairs involving at least one new cell.
-
-We say that $\mathrm{Subdivide}$ is \emph{consistent} if every stellar
-subdivision $(\delta,v)$ it performs splits cells that all have split face
-$\delta$; \emph{alternating} if $\weld(\sigma)$ never belongs to the split
-face of $\sigma$; and \emph{level-homogeneous} if every stellar
-subdivision it performs splits cells of a single level. (The thesis calls
-the last property ``balanced''; we rename it to avoid a clash with
-balanced complexes.)
-
-\subsection{Mitchell's scheme}
-\label{sec:mitchell}
-
-Mitchell's scheme splits the facet opposite the first vertex:
-$\msplit(\sigma)=\partial_0\sigma$, with the new vertex inserted at
-position $0$. For $\omega=\langle x,v_1,\dots,v_d\rangle$ the children of
-$(\partial_0\omega,v)_0$ are, by \eqref{eq:children},
+We write points of $\CP^2$ as unit vectors $p\in\C^3$, defined up to a
+phase, with the Hermitian product $\langle p,q\rangle=\sum_k p_k\bar q_k$.
+The Fubini--Study distance is
 \[
-  c_q\omega=\langle v,x,v_1,\dots,\widehat{v_{d-q}},\dots,v_d\rangle,\qquad q=0,\dots,d-1 .
+  d(p,q)=\arccos\,|\langle p,q\rangle|\in[0,\tfrac{\pi}{2}].
 \]
+To average two points we first align their phases: replacing $q$ by
+$e^{i\theta}q$ with $e^{i\theta}=\overline{\langle p,q\rangle}/|\langle p,q\rangle|$
+makes $\langle p,q\rangle$ real and non-negative. For an aligned pair,
+the points $[(1-u)p+uq]$, $u\in[0,1]$, trace the minimizing geodesic from
+$p$ to $q$, since the real plane spanned by $p$ and $q$ is orthogonal to
+the fibers of $\C^3\setminus\{0\}\to\CP^2$. We call $u$ the \emph{linear
+parameter} of the geodesic. The geodesic midpoint is its point $u=\frac12$,
+$(p+q)/\|p+q\|$. More generally, we call the normalized sum of
+phase-aligned representatives (aligned to the first point) the
+\emph{barycenter} of a set of nearby points; we use it only to place the
+apices of the closing cones (\Cref{sec:topology}).
 
-\begin{definition}[Mitchell invariants]
-$K$ satisfies the \emph{Mitchell invariants} if it satisfies (OneLevel)
-and, for adjacent cells with $\partial_i\sigma=\partial_j\omega$,
-\begin{align*}
-  \level(\sigma)=\level(\omega)&\;\Longrightarrow\; i=0=j\ \text{ or }\ i\ne0\ne j, \tag{MitchellA}\\
-  \level(\sigma)=\level(\omega)+1&\;\Longrightarrow\; i=0\ne j. \tag{MitchellB}
-\end{align*}
-\end{definition}
+The affine chart $U_k=\{p_k\ne0\}$ has coordinates $p_i/p_k$, $i\ne k$.
+For a simplex we use its \emph{best-conditioned chart}, the $k$ that
+maximizes $\min_v|p_k(v)|$ over its vertices $v$. In this chart all its
+vertices are far from the line at infinity $\{p_k=0\}$.
 
-Every mesh satisfies these invariants after the cone $(\sigma,v_\sigma)_0$
-is applied to each of its cells: all new cells have level $0$, and two
-adjacent new cells share a facet that avoids both cone vertices, so
-$i\ne0\ne j$.
+Let $C$ be a smooth curve of degree $n$. By Wirtinger's theorem, the area
+of $C$ in the Fubini--Study metric is $n$ times the area of a projective
+line~\cite{griffithsharris1978}. With the distance above, a projective
+line is a round sphere of radius $\frac12$, so $\area(C)=n\pi$. This gives an exact global quantity to
+compare with the area of a computed triangulation: we use it to measure
+accuracy, and coverage in \Cref{sec:exp-affine}.
 
-\begin{lemma}[direction]\label[lemma]{lem:m-direction}
-Under the Mitchell invariants, if $\partial_i\sigma=\partial_j\omega$ then
-$\level(\omega)\le\level(\sigma)$ when $i=0$, and
-$\level(\omega)\ge\level(\sigma)$ when $i\ne0$.
-\end{lemma}
+\subsection{Maubach bisection}
 
-\begin{proof}
-If $\level(\omega)>\level(\sigma)$, then $\level(\omega)=\level(\sigma)+1$
-by (OneLevel), and (MitchellB) applied to the pair $(\omega,\sigma)$ gives
-$j=0\ne i$. If $\level(\omega)<\level(\sigma)$, (MitchellB) gives
-$i=0$.
-\end{proof}
-
-\begin{lemma}[children]\label[lemma]{lem:m-children}
-Any two children of $(\partial_0\omega,v)_0$ are adjacent, and their
-common facet is obtained from each of them by deleting a vertex at a
-position $\ge2$. In particular every such pair satisfies (MitchellA).
-\end{lemma}
-
-\begin{proof}
-The children form the cone $v\star\partial\delta\star x$ over the
-boundary of the facet $\delta=\partial_0\omega$. The children $c_q\omega$
-and $c_r\omega$ omit two different vertices $v_a,v_b$ of $\delta$ and share
-the remaining $d$ vertices, which form a facet of both. In $c_q\omega$
-this facet is obtained by deleting $v_b$, which sits after $v$ and $x$,
-hence at a position $\ge2$; symmetrically in $c_r\omega$. (The thesis
-lists only the pairs omitting consecutive vertices, which are all the
-pairs when $d\le3$.)
-\end{proof}
-
-\begin{lemma}[two cells]\label[lemma]{lem:m-twocells}
-Let $\sigma,\omega$ be adjacent, $\partial_i\sigma=\partial_j\omega$, with
-$0\le\level(\sigma)-\level(\omega)\le1$, satisfying the Mitchell
-invariants. Subdivide $\omega$ by $(\partial_0\omega,v)_0$, and also
-$\sigma$ if $\partial_0\sigma=\partial_0\omega$. Then all adjacent pairs of
-new cells, and of new cells with $\sigma$, satisfy the invariants.
-\end{lemma}
-
-\begin{proof}
-By (MitchellA) and (MitchellB), exactly three cases occur.
-\begin{enumerate}[label=(\arabic*),itemsep=2pt]
-\item $\level(\sigma)=\level(\omega)$, $i=j=0$. Both cells are split
-  across their common facet. Pairs of children of the same cell satisfy
-  (MitchellA) by \Cref{lem:m-children}. Since
-  $\partial_0\sigma=\partial_0\omega$ as ordered simplices, $c_q\sigma$ and
-  $c_q\omega$ differ only in position $1$, so
-  $\partial_1c_q\sigma=\partial_1c_q\omega$: (MitchellA). A child of
-  $\sigma$ and a child of $\omega$ with different indices share only
-  $d-1$ vertices.
-\item $\level(\sigma)=\level(\omega)$, $i\ne0\ne j$. Only $\omega$ is split.
-  The facet $\partial_j\omega$ contains $x=\omega[0]$ and omits
-  $v_j=\omega[j]$, so it is $\partial_0c_{d-j}\omega$. The pair
-  $(c_{d-j}\omega,\sigma)$ has levels $\level(\sigma)+1,\level(\sigma)$ and
-  indices $0\ne i$: (MitchellB).
-\item $\level(\sigma)=\level(\omega)+1$, $i=0\ne j$. As in (2),
-  $\partial_0\sigma=\partial_j\omega=\partial_0c_{d-j}\omega$, now at equal
-  levels with indices $0,0$: (MitchellA).
-\end{enumerate}
-In all cases the level difference is at most $1$, so (OneLevel) holds.
-\end{proof}
-
-\begin{algorithm}[t]
-\caption{$\textsc{MitchellSubdivide}(K,\sigma)$}
-\label{alg:mitchell}
-\begin{algorithmic}[1]
-\State $\omega\gets$ the cell adjacent to $\sigma$ across $\partial_0\sigma$ (if any)
-\If{$\omega$ exists and $\level(\omega)<\level(\sigma)$}
-  \State $\textsc{MitchellSubdivide}(K,\omega)$;\ $\omega\gets$ the cell adjacent to $\sigma$ across $\partial_0\sigma$
-\EndIf
-\State apply $(\partial_0\sigma,v)_0$ to $\sigma$ and $\omega$
-\end{algorithmic}
-\end{algorithm}
-
-\begin{theorem}\label[theorem]{thm:mitchell}
-Let $K$ satisfy the Mitchell invariants. For every cell $\sigma$,
-\Cref{alg:mitchell} terminates, only splits cells of level at most
-$\level(\sigma)$, and produces a mesh satisfying the Mitchell invariants.
-It is consistent, alternating and level-homogeneous.
-\end{theorem}
-
-\begin{proof}
-By induction on $\level(\sigma)$. By \Cref{lem:m-direction} with $i=0$,
-the neighbor $\omega$ across $\partial_0\sigma$ has
-$\level(\omega)\le\level(\sigma)$. If $\level(\omega)<\level(\sigma)$, the
-recursive call has a smaller argument level; by the induction hypothesis
-it terminates, splits only cells of level at most $\level(\omega)$ (so not
-$\sigma$), and preserves the invariants. By (MitchellB),
-$\partial_0\sigma=\partial_j\omega$ with $j\ne0$, so after $\omega$ is
-split this facet belongs to the child $c_{d-j}\omega$, of level
-$\level(\sigma)$, as its facet $\partial_0$ (case (3) of
-\Cref{lem:m-twocells}). In either case, when line 5 is reached, $\sigma$
-and the cell $\omega$ across $\partial_0\sigma$ have the same level and
-$\partial_0\sigma=\partial_0\omega$. These two cells are the whole star of
-the facet $\partial_0\sigma$, both have it as split face (consistency),
-and both have the same level (level homogeneity). \Cref{lem:m-twocells},
-applied to every adjacent pair involving a new cell, shows that the
-invariants are preserved. Finally, the weld vertex $v$ of a child sits at
-position $0$ and $\msplit=\partial_0$ omits position $0$, so the scheme is
-alternating.
-\end{proof}
-
-% =====================================================================
-\section{Maubach's scheme}
-\label{sec:maubach}
-% =====================================================================
-
-In dimension $2$ a facet is an edge, and Mitchell's scheme is exactly
-newest-vertex bisection. In higher dimensions a facet split is no longer
-a bisection. Maubach's scheme splits an edge; on Kuhn's triangulation of
-the cube it reproduces longest-edge bisection with finitely many
-similarity classes~\cite{maubach1995}. This section describes it as a
-stellar subdivision scheme: which invariant on ordered meshes guarantees
-that the edge chosen by one cell is also the edge chosen by every
-neighbor that contains it? The resulting proof of conformity refers only
-to vertex orders and levels, and applies to any mesh that satisfies the
-invariant, whatever its geometry.
-
-For a cell $\sigma$ of a $d$-mesh set
+A cell of a $d$-mesh is an ordered simplex
+$\sigma=\langle v_0,\dots,v_d\rangle$ with a level $\level(\sigma)\ge0$.
+Maubach's rule~\cite{maubach1995} sets
+$\type(\sigma)=d-(\level(\sigma)\bmod d)$, bisects the edge
+$v_0v_{\type(\sigma)}$ at a new vertex $v$, and replaces $\sigma$ by the
+two children
 \[
-  \type(\sigma):=d-(\level(\sigma)\bmod d)\in\{1,\dots,d\},\qquad
-  \msplit(\sigma):=\sigma[0,\type(\sigma)],
+  \langle v_0,\dots,v_{l-1},v,v_{l+1},\dots,v_d\rangle,\qquad
+  \langle v_1,\dots,v_l,v,v_{l+1},\dots,v_d\rangle,\qquad l=\type(\sigma),
 \]
-and split $\msplit(\sigma)$ with the new vertex at position
-$l=\type(\sigma)$. By \eqref{eq:children}, the children of
-$\sigma=\langle v_0,\dots,v_d\rangle$ are
-\[
-  c_0\sigma=\langle v_0,\dots,v_{l-1},v,v_{l+1},\dots,v_d\rangle,\qquad
-  c_1\sigma=\langle v_1,\dots,v_l,v,v_{l+1},\dots,v_d\rangle,
-\]
-which is exactly the rule of~\cite{maubach1995} and of~\cite[Alg.~1]{dgs2025}.
-Since $\type\ne0$, the facet $\partial_p\sigma$ contains $\msplit(\sigma)$
-iff $p\notin\{0,\type(\sigma)\}$.
+both of level $\level(\sigma)+1$. To keep the mesh conforming, a cell is
+bisected only together with every other cell of the same level that
+contains its split edge, after bisecting recursively any coarser cell
+containing that edge. This terminates, and produces conforming meshes,
+when the initial mesh is \emph{compatible}~\cite{maubach1995,traxler1997,stevenson2008}.
+We use the strongest form of compatibility. An initial mesh is
+\emph{strongly compatible} if, whenever two cells share a facet, the
+facet omits the vertex at the same position $i$ in both, and the
+remaining vertices appear in the same order.
 
-\begin{definition}[Maubach invariants]\label[definition]{def:maubach}
-$K$ satisfies the \emph{Maubach invariants} if it satisfies (OneLevel)
-and, for adjacent cells with $\partial_i\sigma=\partial_j\omega$,
-\begin{align*}
-  \level(\sigma)=\level(\omega)&\;\Longrightarrow\; i=j\ \text{ or }\ \{i,j\}=\{0,\type(\omega)\},\tag{MaubachA}\\
-  \level(\sigma)=\level(\omega)+1&\;\Longrightarrow\; i=\type(\omega)\ \text{ and }\ j\in\{0,\type(\omega)\}.\tag{MaubachB}
-\end{align*}
-$K$ is \emph{strongly compatible} if all its cells have level $0$ and
-$\partial_i\sigma=\partial_j\omega$ implies $i=j$; such a mesh satisfies
-the Maubach invariants.
-\end{definition}
+A $d$-complex is \emph{balanced} if its vertices admit a coloring
+$\col:V\to\{0,\dots,d\}$ that is injective on every cell.
 
-\begin{lemma}[direction]\label[lemma]{lem:direction}
-Under the Maubach invariants, if $\partial_i\sigma=\partial_j\omega$ then
-$\level(\omega)\le\level(\sigma)$ when $i\notin\{0,\type(\sigma)\}$, and
-$\level(\omega)\ge\level(\sigma)$ when $i\in\{0,\type(\sigma)\}$.
-Moreover, if $\level(\omega)=\level(\sigma)$ and
-$i\notin\{0,\type(\sigma)\}$, then $i=j$ and $\msplit(\omega)=\msplit(\sigma)$.
-\end{lemma}
-
-\begin{proof}
-If $\level(\omega)>\level(\sigma)$, then (OneLevel) and (MaubachB) for the
-pair $(\omega,\sigma)$ give $i\in\{0,\type(\sigma)\}$. If
-$\level(\omega)<\level(\sigma)$, (MaubachB) gives $i=\type(\omega)$, and
-$\type(\omega)\notin\{0,\type(\sigma)\}$ because consecutive levels have
-different types. If the levels are equal and $i\notin\{0,\type(\sigma)\}$,
-then $\{i,j\}\ne\{0,\type\}$, so (MaubachA) gives $i=j$; the two cells
-then differ only at position $i$, which is outside $\{0,\type\}$, so their
-split edges coincide.
-\end{proof}
-
-\begin{lemma}[children]\label[lemma]{lem:children}
-For a cell $\omega$ and $l=\type(\omega)$, the children satisfy
-$\partial_0c_0\omega=\partial_{l-1}c_1\omega$, and this pair satisfies
-(MaubachA).
-\end{lemma}
-
-\begin{proof}
-Both sides equal $\langle v_1,\dots,v_{l-1},v,v_{l+1},\dots,v_d\rangle$. The
-children have equal level and type $l'=\type(c_q\omega)$, which is
-$l-1$ if $l>1$ and $d$ if $l=1$. If $l>1$ the indices are $\{0,l-1\}=\{0,l'\}$;
-if $l=1$ both indices are $0$.
-\end{proof}
-
-\begin{lemma}[two cells]\label[lemma]{lem:twocells}
-Let $\sigma,\omega$ be adjacent, $\partial_i\sigma=\partial_j\omega$, with
-$0\le\level(\sigma)-\level(\omega)\le1$, satisfying the Maubach
-invariants, and let $l=\type(\omega)$. Split $\omega$ at
-$\msplit(\omega)$, and also $\sigma$ if it contains $\msplit(\omega)$. Then
-every adjacent pair formed by a child of $\omega$ and $\sigma$ or a child
-of $\sigma$ satisfies the Maubach invariants.
-\end{lemma}
-
-\begin{proof}
-We list all cases allowed by (MaubachA) and (MaubachB), writing
-$\omega=\langle v_0,\dots,v_d\rangle$. In each case we exhibit the facet
-identity. When the two cells have different levels, the coarser one is
-$\sigma$, of type $l$, and we check (MaubachB): the finer index must be
-$l$ and the coarser index must lie in $\{0,l\}$.
-\begin{center}
-\small
-\begin{tabular}{@{}clll@{}}
-\toprule
-case & levels, indices & new identity & invariant \\
-\midrule
-1 & equal, $i=j=0$ & $\partial_0\sigma=\partial_l c_1\omega$ & (B): finer $l$, coarser $0$ \\
-2 & equal, $i=j=l$ & $\partial_l\sigma=\partial_l c_0\omega$ & (B): finer $l$, coarser $l$ \\
-3 & equal, $i=j=k\notin\{0,l\}$ & $\partial_k c_0\sigma=\partial_k c_0\omega$, $\partial_{k'}c_1\sigma=\partial_{k'}c_1\omega$ & (A): $i=j$ \\
-4 & equal, $i=0$, $j=l$ & $\partial_0\sigma=\partial_l c_0\omega$ & (B): finer $l$, coarser $0$ \\
-5 & equal, $i=l$, $j=0$ & $\partial_l\sigma=\partial_l c_1\omega$ & (B): finer $l$, coarser $l$ \\
-6 & $+1$, $i=l$, $j=0$ & $\partial_l\sigma=\partial_l c_1\omega$ & (A): $i=j$ \\
-7 & $+1$, $i=l$, $j=l$ & $\partial_l\sigma=\partial_l c_0\omega$ & (A): $i=j$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-In case 3, $k'=k-1$ if $k<l$ and $k'=k$ if $k>l$.
-
-\emph{Completeness.} At equal levels, if $j\notin\{0,l\}$ then the
-common facet contains $\msplit(\omega)$, so $\sigma$ is split as well and
-$i=j$ by \Cref{lem:direction} (case 3). Otherwise $j\in\{0,l\}$, and
-(MaubachA) leaves cases 1, 2, 4 and 5. At levels differing by one,
-(MaubachB) for $(\sigma,\omega)$ gives $i=l$, $j\in\{0,l\}$ (cases 6
-and 7).
-
-\emph{Identities.} $\partial_0\omega=\langle v_1,\dots,v_d\rangle$ is
-$c_1\omega$ with $v$ (at position $l$) deleted, and
-$\partial_l\omega=\langle v_0,\dots,\widehat{v_l},\dots,v_d\rangle$ is
-$c_0\omega$ with $v$ deleted. This gives cases 1, 2 and 4--7.
-
-In case 3, $\sigma$ and $\omega$ differ only at position $k$ and have the
-same split edge. Their children $c_0\sigma$, $c_0\omega$ still differ only
-at position $k$. Their children $c_1\sigma$, $c_1\omega$ differ only at
-position $k-1$ if $k<l$ (entries $1,\dots,l$ shift down by one) or at
-position $k$ if $k>l$. A child of $\sigma$ and a child of $\omega$ with
-different indices share at most $d-1$ vertices, so these are the only new
-adjacencies.
-
-\emph{Levels.} In cases 1, 2, 4 and 5 the child has level
-$\level(\sigma)+1$; in cases 6 and 7 the child's level equals
-$\level(\sigma)$. (OneLevel) holds in all cases.
-\end{proof}
-
-\begin{algorithm}[t]
-\caption{$\textsc{MaubachSubdivide}(K,\sigma)$~\cite{mello2006}}
-\label{alg:maubach}
-\begin{algorithmic}[1]
-\State $k\gets\type(\sigma)$;\ $\epsilon\gets\sigma[0,k]$;\ $\mathit{st}\gets[\,]$;\ $Q\gets(\sigma)$
-\While{$Q\neq\varnothing$}
-  \State $c\gets\mathrm{pop}(Q)$
-  \If{$c$ not visited}
-    \State mark $c$ visited; append $c$ to $\mathit{st}$
-    \For{$i\in\{1,\dots,d\}\setminus\{\type(c)\}$} \Comment{facets of $c$ containing $\epsilon$}
-      \State $c_a\gets$ the cell adjacent to $c$ across $\partial_i c$ (skip if none)
-      \If{$\level(c_a)<\level(c)$}
-        \State $\textsc{MaubachSubdivide}(K,c_a)$;\ $c_a\gets$ the cell adjacent to $c$ across $\partial_i c$
-      \EndIf
-      \State \textbf{if} $c_a$ not visited \textbf{then} push $c_a$ onto $Q$
-    \EndFor
-  \EndIf
-\EndWhile
-\State split $\epsilon$, with the new vertex at position $k$, in every cell of $\mathit{st}$
-\end{algorithmic}
-\end{algorithm}
-
-\begin{theorem}\label[theorem]{thm:maubach}
-Let $K$ be a conforming mesh satisfying the Maubach invariants, and
-$\sigma$ a cell. Then \Cref{alg:maubach} terminates, only splits cells of
-level at most $\level(\sigma)$, and produces a conforming mesh satisfying
-the Maubach invariants. It is consistent, alternating and
-level-homogeneous.
-\end{theorem}
-
-\begin{proof}
-By induction on $\ell=\level(\sigma)$. Let $\epsilon=\msplit(\sigma)$ and
-$k=\type(\sigma)$. We claim that every cell pushed onto $Q$ has level
-$\ell$, contains $\epsilon$ and has split edge $\epsilon$, and that no
-cell of level $\ge\ell$ is split before the final line.
-
-Let $c$ be such a cell, and $i\notin\{0,\type(c)\}$; the facet
-$\partial_ic$ contains $\epsilon$. By \Cref{lem:direction}, the cell $c_a$
-across it has level $\le\ell$.
-\begin{itemize}
-\item If $\level(c_a)=\ell$, then \Cref{lem:direction} gives
-  $\msplit(c_a)=\epsilon$.
-\item If $\level(c_a)=\ell-1$, the recursive call has argument level
-  $\ell-1$. By the induction hypothesis it terminates, preserves the
-  invariants, and splits only cells of level $\le\ell-1$. In particular it
-  splits no visited or queued cell, so $c$ is still a cell of the mesh.
-  By (MaubachB), $\partial_ic=\partial_j c_a$ with
-  $j\in\{0,\type(c_a)\}$; this facet does not contain
-  $\msplit(c_a)$. When $c_a$ is split, the facet passes whole to a child
-  of level $\ell$, by case 6 or 7 of \Cref{lem:twocells}, and cells of
-  level $\ell$ are never split during the recursion. The cell across
-  $\partial_ic$ is now of level $\ell$, and the first case applies.
-\end{itemize}
-This proves the claim. Each recursive call strictly lowers the level of
-its argument, and each call visits each cell at most once, so the
-algorithm terminates.
-
-When the loop ends, $\mathit{st}$ consists of cells of level $\ell$
-containing $\epsilon$ and closed under adjacency across facets
-containing $\epsilon$. Since $\st(\epsilon,K)$ is strongly connected
-through such facets, $\mathit{st}=\st(\epsilon,K)$. All its cells have
-split edge $\epsilon$ and level $\ell$ (consistency, level
-homogeneity), so the final line is a single stellar subdivision
-$(\epsilon,v)_k$ and the mesh remains conforming.
-
-The new adjacent pairs are of three kinds:
-\begin{itemize}
-\item pairs of children of the same cell, covered by \Cref{lem:children};
-\item pairs of children of two cells of $\mathit{st}$, covered by case 3
-  of \Cref{lem:twocells};
-\item pairs formed by a child and a cell $\sigma'\notin\mathit{st}$. Here
-  $\sigma'$ is adjacent across a facet $\partial_p c$ with
-  $p\in\{0,\type(c)\}$, so $\level(\sigma')\in\{\ell,\ell+1\}$ by
-  \Cref{lem:direction}; this is covered by cases 1, 2, 4--7 of
-  \Cref{lem:twocells}.
-\end{itemize}
-Finally, the weld vertex of a child sits at position $l=\type(\text{parent})$,
-while its split edge occupies positions $0$ and $\type(\text{child})\ne l$.
-The scheme is therefore alternating.
-\end{proof}
-
-\begin{remark}[Geometry]
-The scheme is purely combinatorial; where the new vertex is placed is a
-separate choice. With midpoints on Kuhn's cube, cells of equal type are
-similar~\cite{maubach1995}. In \Cref{sec:example} we place vertices at
-Fubini--Study geodesic midpoints instead; the combinatorics is
-unchanged.
-\end{remark}
-
-\subsection{Relation to Traxler and Stevenson}
-\label{sec:stevenson}
-
-Traxler~\cite{traxler1997} and Stevenson~\cite{stevenson2008} impose a
-condition on the initial mesh only, and prove that all uniform
-refinements are conforming~\cite[Thm.~4.3]{stevenson2008}. They use a
-different convention. A tagged simplex $(x_0,\dots,x_d)_\gamma$ is
-bisected along $x_0x_d$, and
-$T_R=(x_d,x_1,\dots,x_\gamma,x_{d-1},\dots,x_{\gamma+1},x_0)_\gamma$ has
-the same children. Two neighbors are \emph{reflected} if the vertex
-sequence of $T$ or of $T_R$ agrees with that of $T'$ in all but one
-position. Stevenson's condition~(b) asks that neighbors be reflected when
-the refinement edge of either lies on the common facet, and that their
-neighboring children be reflected otherwise. At level $0$, Traxler's type
-$\gamma=0$ corresponds to Maubach's type $d$ with the same vertex
-order~\cite[Rem.~4]{dgs2025}; in both conventions the refinement edge is
-the first--last pair.
-
-\begin{proposition}\label[proposition]{prop:stevenson}
-Let $K$ be a level-$0$ mesh satisfying (MaubachA), and $\sigma,\omega$
-adjacent.
-\begin{enumerate}[label=(\alph*),itemsep=1pt]
-\item If $\partial_i\sigma=\partial_i\omega$, their vertex sequences
-  agree in all but position $i$.
-\item If $\partial_0\sigma=\partial_d\omega$, neither refinement edge lies
-  on the common facet, and the children containing the common facet have
-  vertex sequences that agree in all but one position.
-\end{enumerate}
-Hence (MaubachA) at level $0$ implies condition~(b) of Stevenson, using
-$T$ and never $T_R$.
+\begin{proposition}[{\cite{traxler1997}, \cite[\S3.1]{dgs2025}}]\label[proposition]{prop:balanced}
+A conforming $d$-mesh admits vertex orders that make it strongly
+compatible if and only if it is balanced. The order of each cell is then
+the order of the colors of its vertices.
 \end{proposition}
 
-\begin{proof}
-(a) is immediate. For (b), write $\sigma=\langle a,f_1,\dots,f_d\rangle$ and
-$\omega=\langle f_1,\dots,f_d,b\rangle$. The refinement edges $\{a,f_d\}$
-and $\{f_1,b\}$ do not lie in $\{f_1,\dots,f_d\}$. The children
-containing the common facet are
-$c_1\sigma=\langle f_1,\dots,f_d,v_\sigma\rangle$ and
-$c_0\omega=\langle f_1,\dots,f_d,v_\omega\rangle$, which differ only in the
-last position.
-\end{proof}
-
-We do not know whether the converse holds: Stevenson's condition may
-relate neighbors through $T_R$, i.e.\ with their common vertices in
-reversed order, which equalities of ordered faces cannot express. By
-Stevenson's Remark~4.4 his condition is necessary for conformity of all
-uniform refinements, and by \Cref{thm:maubach} (MaubachA) at level $0$ is
-sufficient. What \Cref{def:maubach} adds to these initial-mesh conditions
-is heredity: it holds at every level, which is what makes the local,
-inductive proof of \Cref{thm:maubach} possible.
+Indeed, if cells are ordered by color, the common facet of two adjacent
+cells carries every color except the missing one, which occupies the
+same position in both. Strong compatibility is a statement about
+\emph{ordered} facets: matching only the position of the omitted vertex,
+without the order of the rest, is not enough.
 
 % =====================================================================
-\section{Initial meshes: strongly compatible seeds are balanced}
-\label{sec:initial}
+\section{An adaptive mesh of $\CP^2$}
+\label{sec:mesh}
 % =====================================================================
 
-\Cref{thm:maubach} moves the whole difficulty to the initial mesh: once
-the Maubach invariants hold at level $0$, refinement takes care of
-itself. For products of simplices, such as Kuhn's cube, they hold by
-construction; in general they do not. Our motivating application raises
-the question for a seed that triangulates a closed $4$-manifold, $\CP^2$,
-rather than a domain of $\R^d$. This section recalls that the strong
-form of the invariant is balance, and uses this to bring in what is known
-about balanced triangulations of closed manifolds.
-
-\subsection{The equivalence}
-
-\begin{definition}
-A pure $d$-dimensional complex $K$ is \emph{balanced} if there is a map
-$\col:V\to\{0,\dots,d\}$, a \emph{coloring}, that is injective on the
-vertices of every cell. Equivalently, its $1$-skeleton is properly
-$(d{+}1)$-colorable.
-\end{definition}
-
-The next proposition is a reformulation of Traxler's reflected
-condition~\cite{traxler1997}. It is stated in terms of colorings
-in~\cite[\S3.1]{dgs2025}. We include a proof in the present language.
-
-\begin{proposition}\label[proposition]{prop:strong-balanced}
-A conforming $d$-mesh admits a vertex order in every cell making it
-strongly compatible if and only if it is balanced. The order of each
-cell is then the order of the colors of its vertices, which is unique up to
-a global permutation of the colors.
-\end{proposition}
-
-\begin{proof}
-($\Leftarrow$) Order each cell by color. The common facet of two adjacent
-cells carries every color except the one omitted, which occupies the same
-position $i$ in both cells, so $i=j$.
-($\Rightarrow$) If $\partial_i\sigma=\partial_i\omega$ as ordered
-simplices, every vertex of the common facet occupies the same position in
-$\sigma$ and in $\omega$. The star of a vertex $v$ is strongly connected
-through facets containing $v$, so the position of $v$ is the same in all
-cells containing it. This position defines $\col(v)$, and it is injective
-on each cell. Uniqueness follows by the same propagation argument.
-\end{proof}
-
-\begin{remark}[Index-only matching is not enough]\label[remark]{rem:index-only}
-A weaker, tempting condition asks only that the omitted vertex sit at the
-same local \emph{index} on both sides of each facet, i.e.\ a proper
-$(d{+}1)$-edge-coloring of the dual graph in which every cell sees every
-color. It does not suffice. In dimension $3$, take
-$\sigma=\langle a,b,c,d\rangle$ and $\omega=\langle d,x,c,a\rangle$,
-sharing $\{a,c,d\}$ at index $1$ on both sides, with common split edge
-$\{a,d\}$. After one bisection with new vertex $m$, the children
-$\langle a,b,c,m\rangle$ and $\langle x,c,a,m\rangle$ share $\{a,c,m\}$
-at indices $1$ and $0$, at type $2$. This violates (MaubachA): the split
-edge $\{a,c\}$ of the first lies in the second, whose split edge is
-$\{x,a\}$. Index-only matchings are much more common than balance.
-By Kőnig's theorem they exist whenever the dual graph is bipartite, and
-exhaustive search finds one on Kühnel's $\CP^2_9$, whose dual graph is not
-bipartite and which is not balanced (\Cref{prop:kuhnel}).
-\end{remark}
-
-\subsection{Classical constructions}
-
-\begin{corollary}[{\cite[Thm.~9]{mello2006}}]\label[corollary]{cor:product}
-The staircase triangulation of a product of simplices
-$\Delta^{m_1}\times\cdots\times\Delta^{m_k}$ is balanced, with
-$\col(v_L)=|L|$. In particular Kuhn's triangulation of the cube is
-strongly compatible.
-\end{corollary}
-
-\begin{corollary}[{\cite[Thm.~10]{mello2006}}]\label[corollary]{cor:bary}
-The barycentric subdivision of any mesh is balanced, with the barycenter
-of $\delta$ colored $\dim\delta$. It is produced by the ordered stellar
-subdivisions $(\delta,v_\delta)_{\dim\delta}$, in order of decreasing
-dimension.
-\end{corollary}
-
-\begin{proposition}\label[proposition]{prop:product}
-If $K_1,K_2$ are balanced with colorings $\col_1,\col_2$, the staircase
-triangulation of $K_1\times K_2$, built prism by prism from monotone
-lattice paths, is balanced with $\col(a,b)=\col_1(a)+\col_2(b)$.
-\end{proposition}
-
-\begin{proof}
-A cell of the prism $\sigma_1\times\sigma_2$ is a monotone path
-$L_0,\dots,L_{m_1+m_2}$ with $|L_p|=p$. Its $p$-th vertex is
-$(\sigma_1[L^1_p],\sigma_2[L^2_p])$, of color $L^1_p+L^2_p=p$. The coloring
-is defined on vertices, so it is consistent across prisms.
-\end{proof}
-
-For instance, the octahedron is balanced (color $\pm e_k$ by $k$), so the
-staircase triangulation of $S^2\times S^2$ as a product of two octahedra
-is a strongly compatible seed.
-
-Stevenson's pre-refinement~\cite[App.~A]{stevenson2008}, after
-Kossaczký, is essentially the barycentric subdivision without the
-edge-midpoint level: it has $\frac12(d{+}1)!$ cells per simplex instead
-of $(d{+}1)!$, and satisfies the weaker matching condition. The coloring
-initialization of~\cite{dgs2025} avoids pre-refinement altogether; for
-balanced meshes it coincides with \Cref{prop:strong-balanced}, and for
-the others it uses more than $d+1$ colors.
-
-\subsection{Closed manifolds}
-\label{sec:colorability}
-
-For a closed $d$-manifold $M$, Dynnikov and Novikov consider three
-classes of triangulations, which Gaifullin~\cite[\S2]{gaifullin2009}
-denotes $T_{\mathrm{colour}}(M)\subseteq T_{\mathrm{even}}(M)$ and
-$T_{\mathrm{bw}}(M)\subseteq T_{\mathrm{even}}(M)$:
-\begin{itemize}[itemsep=1pt]
-\item $T_{\mathrm{colour}}(M)$ consists of the balanced triangulations;
-\item $T_{\mathrm{bw}}(M)$ consists of the triangulations whose top
-  simplices admit a \emph{chess coloring}, i.e.\ whose dual graph is
-  bipartite;
-\item $T_{\mathrm{even}}(M)$ consists of the triangulations in which every
-  $(d{-}2)$-simplex lies in an even number of top simplices.
-\end{itemize}
-Gaifullin shows that $T_{\mathrm{colour}}\subseteq T_{\mathrm{bw}}$ when
-$M$ is orientable, and that all three classes coincide when $M$ is simply
-connected. The first inclusion has a one-line proof in our language:
-
-\begin{lemma}[{\cite[\S2]{gaifullin2009}}]\label[lemma]{lem:chess}
-The dual graph of an orientable, strongly connected, balanced, closed
-pseudomanifold is bipartite.
-\end{lemma}
-
-\begin{proof}
-Fix a coherent orientation. Let $\varepsilon(\sigma)=\pm1$ record whether
-the color order of $\sigma$ is positively oriented. Two adjacent cells
-induce on their common facet the orientations $(-1)^k\varepsilon(\sigma)$
-and $(-1)^k\varepsilon(\omega)$ relative to its color order, where $k$ is
-the missing color. Coherence makes these opposite, so
-$\varepsilon(\sigma)=-\varepsilon(\omega)$.
-\end{proof}
-
-Combined with \Cref{prop:strong-balanced}, this identifies the seeds that
-our framework accepts.
-
-\begin{corollary}\label[corollary]{cor:seeds}
-Let $K$ be a triangulation of a closed combinatorial $d$-manifold $M$,
-$d\ge2$. Then $K$ is a strongly compatible seed for Maubach bisection if
-and only if $K\in T_{\mathrm{colour}}(M)$. If $M$ is simply connected,
-this holds if and only if every $(d{-}2)$-simplex of $K$ has even degree.
-\end{corollary}
-
-The degree criterion is Traxler's condition for simply connected
-domains~\cite{traxler1997}, now for closed manifolds. Joswig's
-projectivity group gives the general criterion~\cite{joswig2002}.
-A lower bound on the size of such seeds is also known:
-
-\begin{proposition}[{\cite[Prop.~2.3]{gaifullin2009}}]\label[proposition]{prop:3d3}
-A balanced combinatorial triangulation of a closed $d$-manifold with
-fewer than $3d+3$ vertices triangulates a sphere.
-\end{proposition}
-
-\subsection{Seeds for $\CP^2$}
+\subsection{The seed}
 \label{sec:cp2}
 
 $\CP^2$ has two classical small triangulations. Kühnel's
@@ -923,32 +323,12 @@ $\CP^2_9$~\cite{kuhnelbanchoff1983} has $9$ vertices and is vertex-minimal.
 Gaifullin's $X$~\cite{gaifullin2009} has $15$ vertices, $f$-vector
 $(15,90,240,270,108)$, and automorphism group $S_4\times S_3$, which acts
 by Fubini--Study isometries in Gaifullin's explicit realization.
-
-\begin{proposition}\label[proposition]{prop:kuhnel}
-Kühnel's $\CP^2_9$ is not a strongly compatible seed.
-\end{proposition}
-
-\begin{proof}
-$\CP^2_9$ is $3$-neighborly, so its graph is $K_9$, which is not
-$5$-colorable. Alternatively, it has only $9<15$ vertices, and
-\Cref{prop:3d3} applies.
-\end{proof}
-
-\begin{theorem}[Gaifullin~\cite{gaifullin2009}]\label[theorem]{thm:gaifullin}
-$X$ is balanced: color the three vertices of $V_4\setminus\{e\}$ with $0$
-and the vertices $(a,b)$ with $a$, for $a=1,\dots,4$. It is a
-vertex-minimal balanced triangulation of $\CP^2$.
-\end{theorem}
-
-\begin{corollary}\label[corollary]{cor:minimal-seed}
-Every strongly compatible seed of $\CP^2$ has at least $15$ vertices, and
-Gaifullin's $X$, ordered by its coloring, is a strongly compatible seed
-with exactly $15$.
-\end{corollary}
-
-\begin{proof}
-Combine \Cref{cor:seeds}, \Cref{prop:3d3} and \Cref{thm:gaifullin}.
-\end{proof}
+Gaifullin shows that $X$ is balanced: color the three vertices of
+$V_4\setminus\{e\}$ with $0$ and the vertices $(a,b)$ with $a$, for
+$a=1,\dots,4$. He also shows that $X$ is vertex-minimal among balanced
+triangulations of $\CP^2$. By \Cref{prop:balanced}, $X$ ordered by its
+coloring is a strongly compatible seed. Kühnel's $\CP^2_9$ is not: it is
+$3$-neighborly, so its graph is $K_9$, which is not $5$-colorable.
 
 \begin{remark}
 We verified these facts independently on the facet list of $X$ (with
@@ -957,24 +337,28 @@ We verified these facts independently on the facet list of $X$ (with
 \item every vertex has exactly two non-neighbors, namely the other members
   of its color class;
 \item all $240$ triangles have degree $4$ or $6$;
-\item in the color order, all $270$ shared facets satisfy $i=j$.
+\item in the color order, all $270$ shared facets omit the vertex at the
+  same position on both sides.
 \end{itemize}
 The $108$ seed cells are also geometrically uniform: the max/min
 Fubini--Study edge ratio is $1.4636$ in every cell, as expected from the
-isometric symmetry. By \Cref{cor:bary}, the barycentric subdivision of
-$\CP^2_9$ is balanced too. In Kühnel's standard realization, however,
-several flag barycenters coincide with existing vertices, which produces
-degenerate cells.
+isometric symmetry. The barycentric subdivision of $\CP^2_9$ is balanced
+too, but in Kühnel's standard realization several flag barycenters
+coincide with existing vertices, which produces degenerate cells.
 \end{remark}
 
-% =====================================================================
-\section{Pointerless codes on balanced seeds}
+\paragraph{Geometry.}
+We use Gaifullin's coordinates~\cite{gaifullin2009}, moved by a random
+unitary change of basis of $\C^3$ to avoid special alignments between the
+curve and the seed. Each new vertex is placed at the Fubini--Study
+geodesic midpoint of the split edge, after aligning the phases of the two
+homogeneous representatives. Coordinates are cached by vertex
+identifier.
+
+\subsection{Pointerless codes on balanced seeds}
 \label{sec:lpt}
-% =====================================================================
 
-\subsection{Why codes}
-\label{sec:why-codes}
-
+\paragraph{Why codes.}
 An explicit mesh stores each simplex with references to its faces and
 cofaces. The number of faces per cell grows quickly with the dimension. In
 the Freudenthal--Kuhn triangulation of $\R^d$, which is the combinatorial
@@ -1001,38 +385,9 @@ vertex identifiers and $d+1$ neighbor identifiers, i.e.\ $8(d+1)$ bytes
 per cell with 32-bit integers ($40$ bytes for $d=4$) plus bookkeeping for
 levels and the hierarchy. An LPT code needs about
 $L+\log_2(2^dd!)+O(\log d)$ bits for $L$ levels, whatever the dimension.
+\Cref{sec:exp-cost} compares memory in practice.
 
-We measured one full incidence structure, VGTL's
-\texttt{nmt<4>}~\cite{vgtl}, against the pointerless leaf table of
-\Cref{sec:leafset}, on uniform refinement of Gaifullin's seed with no
-coordinates and no other data. Both hold exactly the same $108\cdot2^D$
-leaves.
-\begin{center}
-\small
-\begin{tabular}{@{}lrrrrr@{}}
-\toprule
-& \multicolumn{2}{c}{\texttt{nmt<4>}} & & \multicolumn{2}{c}{pointerless} \\
-\cmidrule{2-3}\cmidrule{5-6}
-$D$ (leaves) & cells stored & bytes/leaf & & table & bytes/leaf \\
-\midrule
-8 ($27\,648$) & $55\,188$ & 222 & & 0.5 MB & 19.5 \\
-12 ($442\,368$) & $884\,628$ & 222 & & 8.6 MB & 19.5 \\
-\bottomrule
-\end{tabular}
-\end{center}
-\texttt{nmt<4>} keeps every cell ever created, so that coarsening remains
-possible, together with all faces; this costs $222$ bytes per leaf. The
-pointerless table stores one 64-bit code per leaf at load factor $0.41$,
-i.e.\ $19.5$ bytes per leaf. That is about $11\times$ less than this full
-incidence structure, and about $2\times$ less than the $40$-byte compact
-structure estimated above. Neither figure includes per-vertex data such
-as coordinates, which both approaches need when geometry is required.
-Beyond memory, the main benefit of the codes is that neighbors,
-children and parents are computed rather than stored. This keeps the
-data structure trivially consistent under refinement.
-
-\subsection{LPT codes}
-
+\paragraph{LPT codes.}
 Atalay and Mount~\cite{atalaymount2007} encode the Maubach hierarchy of a
 Kuhn-triangulated cube $[-1,1]^d$. Its reference root simplex is
 \[
@@ -1065,8 +420,7 @@ cube. Our implementation descends from the one we wrote for the Adaptive
 Voids algorithm~\cite{sa2015adaptive}, where LPT codes over the six Kuhn
 tetrahedra of a cube drive an adaptive subdivision of a solid.
 
-\subsection{Balanced seeds}
-
+\paragraph{Balanced seeds.}
 Let $K_0$ be a balanced $d$-dimensional seed with $N_0$ cells, each ordered
 by color, and identify every seed cell $\tau=\langle\tau[0],\dots,\tau[d]\rangle$
 with $S_\varnothing$ by sending the $k$-th vertex of $S_\varnothing$ to
@@ -1080,8 +434,8 @@ coordinates $w(\kappa,m)$ of the $m$-th vertex of $(s,\kappa)$ depend on
 $\kappa$ only. A vertex on a facet of $\tau_s$ is also a vertex of the
 neighboring seed cell, via the identification of the common facet. A
 geometric realization is applied afterwards: affine, or by Fubini--Study
-midpoints as in \Cref{sec:example}. Since it is defined edge by edge from
-the endpoints of the split edge, it respects these identifications.
+midpoints. Since it is defined edge by edge from the endpoints of the
+split edge, it respects these identifications.
 
 \begin{proposition}[seed-boundary test]\label[proposition]{prop:boundary-test}
 Facet $\partial_i$ of the cell with code $\kappa=(\ell,\Pi,\Phi)$ lies on
@@ -1124,7 +478,7 @@ $\partial_ic'=\partial_ic$ as ordered simplices.
 \end{proposition}
 
 \begin{proof}
-By \Cref{prop:strong-balanced}, $\partial_j\tau_s=\partial_j\tau_{s'}$
+Since the seed is ordered by color, $\partial_j\tau_s=\partial_j\tau_{s'}$
 as ordered simplices, i.e.\ $\tau_s[p]=\tau_{s'}[p]$ for every $p\ne j$.
 For $m\ne i$, the $m$-th vertex of $c$ lies on $\partial_j\tau_s$, so its
 coordinates satisfy $w_j(\kappa,m)=0$. The $m$-th vertex of $c'$ has the
@@ -1132,16 +486,14 @@ same coordinates with respect to $\tau_{s'}$, hence the same position on
 the common facet. It is therefore the same vertex of the refined seed.
 So $c'$ contains $\partial_ic$, in the same positions, has the same level
 as $c$, and lies in the other seed cell. Uniform refinements of a
-strongly compatible mesh are conforming (\Cref{thm:maubach}, applied to
-every cell of a level in turn), so exactly two cells of that level
-contain $\partial_ic$. Hence $c'$ is the neighbor.
+strongly compatible mesh are conforming~\cite{maubach1995,traxler1997},
+so exactly two cells of that level contain $\partial_ic$. Hence $c'$ is
+the neighbor.
 \end{proof}
 
 This is where balance, rather than any compatible ordering, is used:
 without it the two identifications would differ on the common facet by a
 permutation, and the code would have to be transformed.
-
-\subsection{Neighbor finding}
 
 \begin{figure}[t]
 \centering
@@ -1161,11 +513,13 @@ script that asserts both facts.}
 \label{fig:seed-crossing}
 \end{figure}
 
+\paragraph{Neighbor finding.}
 To find the neighbor of $c=(s,\kappa)$ across $\partial_ic$:
 \begin{enumerate}[itemsep=2pt]
 \item \emph{Sibling facet.} If $\partial_ic$ is the facet created by the
-  last bisection ($i=d$ for a $0$-child, $i=\type$ for a $1$-child),
-  return the other child of the parent (\Cref{lem:children}).
+  last bisection ($i=d$ for a $0$-child, $i=\type$ for a $1$-child, in
+  the vertex numbering of the codes), return the other child of the
+  parent.
 \item \emph{Boundary test.} Otherwise, look up $(j,\delta)$ for
   $(\ell,\Pi,i)$ and check the orthant condition of
   \Cref{prop:boundary-test}.
@@ -1180,6 +534,8 @@ formula returns a cell of the reflected reference simplex, i.e.\ one with
 negative barycentric weights. Such crossings are frequent: about $24\%$
 of the non-sibling facets sampled at realistic depths lie on the seed
 boundary. \Cref{fig:seed-crossing} illustrates rules~2 and~4.
+Here $0$-child and $1$-child refer to Atalay and Mount's numbering, and
+$\type=\ell$ with $\ell=0$ read as $d$.
 
 \paragraph{Verification.}
 We checked every returned neighbor \emph{exactly} on Gaifullin's seed
@@ -1197,9 +553,8 @@ test agrees with it on $7.8$ million facets, and same-code crossing agrees
 on $1.4$ million crossings. The new rules take $4.3$\,ns and $5$\,ns per
 query, against $79$\,ns and $211$\,ns.
 
-\subsection{The leaf set}
+\paragraph{The leaf set.}
 \label{sec:leafset}
-
 The mesh is the set of codes of the current leaves, stored in an
 open-addressing hash table: one 64-bit slot per leaf, linear probing,
 and backward-shift deletion, which avoids tombstones under the
@@ -1208,9 +563,10 @@ one word: $7$ bits of seed index, $2$ bits for $\ell$, $9$ for $\Pi$, $4$
 for $r$ and $4\times10$ for the orthant list, i.e.\ $62$ bits and a depth of
 up to $43$. Two operations are built on the table:
 \begin{itemize}[itemsep=2pt]
-\item $\texttt{compat\_bisect}(c)$ is \Cref{alg:maubach} on codes. It
-  bisects coarser neighbors recursively before bisecting $c$, so the mesh
-  stays graded: no facet separates cells more than one level apart;
+\item $\texttt{compat\_bisect}(c)$ is Maubach's conforming bisection on
+  codes. It bisects coarser neighbors recursively before bisecting $c$,
+  so the mesh stays graded: no facet separates cells more than one level
+  apart;
 \item $\texttt{neighbor\_leaf}(c,i)$ walks up the ancestor chain of the
   combinatorial neighbor to the current leaf, or reports that the region
   has been refined further.
@@ -1225,42 +581,136 @@ vertices are about $1/d!$ as numerous as cells.
 \paragraph{Limitations.}
 Enumerating the several finer leaves that border a coarser facet is not
 implemented; such queries are reported, never guessed. Seeds that are
-compatible only in the weak sense of (MaubachA) would need a permutation
-correction in \Cref{prop:crossing}. For the initialization
-of~\cite{dgs2025} with $N>d$ colors, a cell is a face of a virtual
-$N$-simplex. Refinements of the virtual extension do not restrict to
-refinements of the mesh~\cite[Rem.~12]{dgs2025}, so it is unclear how to
-encode them.
+compatible but not balanced would need a permutation correction in
+\Cref{prop:crossing}. For the initialization of~\cite{dgs2025} with $N>d$
+colors, a cell is a face of a virtual $N$-simplex. Refinements of the
+virtual extension do not restrict to refinements of the
+mesh~\cite[Rem.~12]{dgs2025}, so it is unclear how to encode them.
 
 % =====================================================================
-\section{Example: plane curves inside $\CP^2$}
-\label{sec:example}
+\section{Extraction and continuation}
+\label{sec:extraction}
 % =====================================================================
 
-Let $F(X,Y,Z)$ be homogeneous of degree $n$ and $C=\{F=0\}\subset\CP^2$
-smooth. Then $C$ is a compact Riemann surface of genus $(n-1)(n-2)/2$, and a
-real surface of codimension $2$ in $\CP^2$. We triangulate it as follows.
+\subsection{Realizing the faces}
+\label{sec:faces}
 
-\paragraph{Mesh of $\CP^2$.}
-The seed is Gaifullin's $X$ with his coordinates~\cite{gaifullin2009},
-moved by a random unitary change of basis of $\C^3$ to avoid special
-alignments between the curve and the seed. It is refined by pointerless
-Maubach bisection (\Cref{sec:lpt}). Each new vertex is placed at the
-Fubini--Study geodesic midpoint of the split edge, after aligning the
-phases of the two homogeneous representatives. Coordinates are cached by
-vertex identifier.
+The mesh is combinatorial; extraction needs every triangular $2$-face as
+an actual surface in $\CP^2$, on which $F=0$ can be solved. The obvious
+choice, the flat triangle spanned by the three vertices in an affine
+chart, depends on the chart. A face shared by many cells is solved once,
+so it can use only one chart, and the natural choice is the face's own
+best-conditioned chart. But then two faces that share an edge and use
+different charts see that edge as two different curves. The four faces
+of a tetrahedral facet no longer form a closed surface, and the curve can
+cross the resulting seams an odd number of times. In our first
+implementation this was the dominant source of failures
+(\Cref{sec:exp-faces}).
 
-\paragraph{Extraction.}
-For a leaf $c$, each of its $10$ triangular $2$-faces is intersected with
-$C$ by Newton's method in the best-conditioned affine chart of that face.
-Results are cached by the face's vertex identifiers, so adjacent cells
-see identical crossings. On each tetrahedral facet, the crossings are
-paired into arcs, by minimal total geodesic length when there are four.
-The arcs are then assembled into closed polygons approximating $C\cap c$.
-A cell is \emph{bad} when this assembly fails, e.g.\ at a node of degree
-$\ne2$, which happens near tangencies.
+We realize every face without charts. Let $A,B,C$ be its vertices, sorted
+by global identifier, with their unit representatives. The face is the
+\emph{geodesic cone} from $A$ over the geodesic $BC$:
+\[
+  q(t)=(1-t)B+t\,\tilde C,\qquad
+  v(s,t)=(1-s)A+s\,\tilde q(t),\qquad (s,t)\in[0,1]^2,
+\]
+where $\tilde C$ is $C$ aligned to $B$ and $\tilde q(t)$ is $q(t)$
+aligned to $A$. On the boundary, $t=0$, $t=1$ and $s=1$ give the
+geodesics $AB$, $AC$ and $BC$, each traversed by its linear parameter
+from the lower identifier to the higher one. An edge is therefore the
+same curve, with the same parameter, in every face that contains it, and
+the Fubini--Study midpoint used for bisection lies on it. We use
+\[
+  (\lambda_A,\lambda_B,\lambda_C)=(1-s,\ s(1-t),\ st)
+\]
+as barycentric coordinates on the face; on each edge they reduce to the
+linear parameter.
 
-\paragraph{Continuation.}
+\begin{proposition}\label[proposition]{prop:parity}
+Let $T$ be a tetrahedral facet of the mesh whose four realized faces lie
+in a geodesic ball of radius less than $\pi/2$. If $C$ meets these faces
+transversally, at points interior to the faces, then it meets them in an
+even number of points.
+\end{proposition}
+
+\begin{proof}
+The four faces glue along their common edges into a map
+$\phi:S^2\to\CP^2$. A geodesic ball of radius less than $\pi/2$ around
+$p$ lies in the affine chart $\{x:\langle x,p\rangle\ne0\}\cong\C^2$, which
+is contractible, so $\phi$ extends to a map of the $3$-ball. Its image is
+a singular $3$-chain $D$ with $\partial D=\phi(S^2)$. Since $C$ is closed,
+its intersection number with a boundary vanishes, so
+$\#(C\cap\phi(S^2))\equiv0\pmod 2$.
+\end{proof}
+
+With chart-flat faces the four faces do not glue, $\phi$ is not defined,
+and odd counts occur. In practice the hypothesis on the ball holds for
+all cells after the first few levels.
+
+\subsection{Per-cell extraction}
+
+For a leaf $c$, we compute the crossings of $C$ with the $10$ triangular
+$2$-faces of $c$, join them into arcs on its $5$ tetrahedral facets, and
+assemble the arcs into closed polygons that approximate $C\cap c$.
+Crossings are cached by the vertex identifiers of their face, so adjacent
+cells see identical crossings.
+
+Why $2$-faces: a $k$-simplex and the real surface $C$ meet, generically,
+in a set of dimension $k+2-4$. So $C$ misses the edges and meets each
+triangular face in isolated points; it meets each tetrahedral facet in
+arcs whose endpoints lie on the four triangles of that facet; and it
+meets the cell in a surface piece whose boundary is a closed curve
+through the facets. The extraction follows these dimensions upward.
+\begin{itemize}[itemsep=2pt]
+\item \emph{Crossings.} On a face, $F(v(s,t))=0$ is a system of two real
+  equations in $(s,t)$; since $F$ is homogeneous, $v$ need not be
+  normalized. Newton's method uses the analytic Jacobian of
+  $(s,t)\mapsto F(v(s,t))$, and is started from the zero of the linear
+  interpolant of $F$ at the aligned vertices and from four fixed points
+  of the face. Distinct roots in $[0,1]^2$ are kept, up to two per face.
+\item \emph{Arcs.} On each tetrahedral facet, two crossings are joined by
+  an arc. With four crossings, they are paired so as to minimize the
+  total Fubini--Study length of the two arcs. A single crossing (the
+  curve only touches the facet) is ignored, and three or more than four
+  make the facet \emph{irregular}.
+\item \emph{Polygons.} The arcs form a graph on the crossings of the cell.
+  If every node has degree $2$, the graph is a disjoint union of cycles,
+  each with $3$ to $5$ nodes, and each cycle is output as one polygon.
+\end{itemize}
+A crossing on an edge or at a vertex, up to a tolerance, is identified by
+that edge or vertex, so that all cells containing it agree on its
+identity. A cell is \emph{bad} when the assembly fails: a node of degree
+other than $2$, an irregular facet, or a cycle with fewer than $3$ or
+more than $5$ nodes. A planar piece meets a $4$-simplex in a convex
+polygon with at most one edge per facet, so longer cycles signal strong
+curvature or a near-tangency. With geodesic faces, the remaining failures
+occur at near-tangencies (\Cref{sec:exp-badrate}). A bad cell contributes no polygon and leaves a
+hole in the output.
+
+\subsection{Bernstein enclosure}
+\label{sec:bernstein}
+
+With chart-flat faces, an optional test bounds $F$ on a $2$-face before
+running Newton. In the face's chart, $F$ restricted to the flat triangle
+is a polynomial of degree $n$ in the barycentric coordinates. Its coefficients in the
+Bernstein basis enclose the real and imaginary parts of $F$ on the
+triangle~\cite{reuter2008}, and the enclosure can be tightened by
+subdividing the triangle. If $0$ lies outside the enclosure of
+$\mathrm{Re}\,F$ or of $\mathrm{Im}\,F$, the face has no crossing and
+Newton is skipped. If Newton finds no root on a face whose enclosure
+contains $0$, subdivision is followed down to a subtriangle whose
+enclosure still contains $0$, and its centroid is used as a further
+Newton seed. Enclosures are cached per face.
+
+The enclosure guarantees that a skipped face has no crossing, up to
+floating-point rounding of the Bernstein coefficients. It does not
+certify the crossings that are found, nor the topology of the output.
+On geodesic faces, $F\circ v$ is not a polynomial, and the analogous test
+would need interval arithmetic. \todo{decide whether to keep this
+subsection (decision D3) now that it applies only to chart-flat faces.}
+
+\subsection{Continuation}
+
 Starting from one seed cell that meets $C$, a frontier of cells is
 processed as follows:
 \begin{itemize}[itemsep=1pt]
@@ -1270,44 +720,69 @@ processed as follows:
   the five facets, found by \texttt{neighbor\_leaf}, join the frontier.
 \end{itemize}
 Moving through the mesh thus uses only the combinatorial operations of
-\Cref{sec:lpt}. Two optional mechanisms refine further near tangencies:
+\Cref{sec:lpt}. The continuation reaches every cell whose $2$-faces are
+crossed by a connected curve. A small closed component of $C\cap c$ that
+meets no $2$-face of $c$ would be missed, and a reducible curve needs one
+starting cell per component.
+
+\begin{algorithm}[t]
+\caption{Continuation to target depth $D$}
+\label{alg:continuation}
+\begin{algorithmic}[1]
+\State $s\gets$ the first seed cell whose extraction has at least one arc
+\State $Q\gets(s)$;\ $\mathit{visited}\gets\varnothing$
+\While{$Q\ne\varnothing$}
+  \State $c\gets\mathrm{pop}(Q)$
+  \If{$c$ is not a current leaf \textbf{or} $c\in\mathit{visited}$} \textbf{continue} \EndIf
+  \State add $c$ to $\mathit{visited}$; extract $c$
+  \If{$c$ has no arc} \textbf{continue} \Comment{the curve does not reach $c$}\EndIf
+  \If{$\level(c)<D$ \textbf{or} $c$ is near-tangent (\Cref{sec:tangency})}
+    \State $\texttt{compat\_bisect}(c)$; push the new leaves onto $Q$
+  \Else
+    \For{$i=0,\dots,d$}
+      \State \textbf{if} $\texttt{neighbor\_leaf}(c,i)$ finds a leaf $c'\notin\mathit{visited}$ \textbf{then} push $c'$ onto $Q$
+    \EndFor
+  \EndIf
+\EndWhile
+\State extract every leaf that meets $C$; output the polygons of the good cells
+\end{algorithmic}
+\end{algorithm}
+\Cref{alg:continuation} summarizes the procedure.
+
+\subsection{Refinement near tangencies}
+\label{sec:tangency}
+
+Two optional mechanisms refine further where extraction is likely to
+fail:
 \begin{itemize}[itemsep=1pt]
 \item a \emph{tangency threshold} on a Cauchy--Riemann transversality
   score computed at each crossing;
 \item \emph{repair rounds} that re-bisect bad cells.
 \end{itemize}
-The continuation reaches every cell whose $2$-faces are crossed by a
-connected curve. A small closed component of $C\cap c$ that meets no
-$2$-face of $c$ would be missed, and a reducible curve needs one starting
-cell per component.
 
-\begin{figure}[t]
-\centering
-\begin{minipage}[b]{0.50\linewidth}\centering
-\includegraphics[width=\linewidth]{figures/elliptic_flat.png}\\[2pt]
-{\small (a)}
-\end{minipage}\hfill
-\begin{minipage}[b]{0.40\linewidth}\centering
-\includegraphics[width=\linewidth]{figures/quartic_alpha.png}\\[2pt]
-{\small (b)}
-\end{minipage}
-\caption{Curves triangulated inside $\CP^2$.
-(a)~The elliptic curve $X^2Z-Y^3+YZ^2=0$, i.e.\ $w^2=z^3-z$ in the chart
-$Z=1$ ($w=X$, $z=Y$), displayed as the graph
-$(\mathrm{Re}\,z,\mathrm{Im}\,z,\mathrm{Re}\,w)$, clipped to
-$|\mathrm{Re}\,z|,|\mathrm{Im}\,z|\le2$ and $|\mathrm{Re}\,w|\le3$; depth $18$,
-$0.39\%$ bad cells.
-(b)~The Fermat quartic $X^4+Y^4+Z^4=0$ (genus $3$) under Dutter's
-chart-free map $\tilde\alpha:\CP^2\to\R^3$~\cite{dutter2026}, colored by
-distance to the center and drawn semi-transparent; depth $17$, $3.35\%$ bad
-cells. Both surfaces were closed as described in \Cref{sec:example}. The
-faint marks are discontinuities of the interpolated normals, at the
-closing cones (most marks in~(b)) and at thin polygons of the extraction
-(the darker streaks in~(a)), not holes.}
-\label{fig:riemann}
-\end{figure}
+The \emph{transversality score} of a crossing $x=[v(s,t)]$ on a face is
+\[
+  \tau(x)=\frac{|\mathrm{Im}(\bar w_1 w_2)|}{|e_1|\,|e_2|\,|\nabla F(v)|^2},\qquad
+  w_k=\nabla F(v)\cdot e_k,
+\]
+where $e_1,e_2$ are $\partial_sv,\partial_tv$ projected orthogonally to $v$,
+and $\nabla F=(\partial_XF,\partial_YF,\partial_ZF)$. Since $F$ is
+holomorphic and $\nabla F(v)\cdot v=nF(v)=0$, $w_k$ is the derivative of
+$F$ along the face in the direction $e_k$, and $\mathrm{Im}(\bar w_1w_2)$ is the Jacobian determinant of
+$(\mathrm{Re}\,F,\mathrm{Im}\,F)$ restricted to the face. By
+Cauchy--Schwarz, $\tau\in[0,1]$, with $\tau=0$ exactly when the plane of
+the face is not transverse to $C$ at $x$. A cell's score is the minimum
+over its crossings. With a threshold $t>0$, a cell at the target depth
+whose score is below $t$ is bisected further, up to a fixed number of
+extra levels (four by default). A repair round bisects every bad leaf
+once, within its own budget of extra levels (also four by default), and
+extracts every leaf again.
 
-\paragraph{Topological consistency.}
+% =====================================================================
+\section{Topological verification and closing}
+\label{sec:topology}
+% =====================================================================
+
 The output is not certified. Its topology can nevertheless be checked,
 directly on the extracted $2$-complex in $\CP^2$, independently of any
 projection. Vertices are identified by the mesh vertex, edge or $2$-face
@@ -1328,12 +803,133 @@ surface:
 These are necessary conditions. A missing handle and a spurious one would
 cancel in $\chi$, and $\chi$ says nothing about the embedding. They are
 nevertheless a useful sanity check for an uncertified method.
+
+% =====================================================================
+\section{Experiments}
+\label{sec:experiments}
+% =====================================================================
+
+All runs used one core of an AMD Ryzen~5 5625U laptop with $7.2$\,GB of
+RAM, and code compiled with GCC~16. The curves are smooth:
+\begin{center}
+\small
+\begin{tabular}{@{}llc@{}}
+\toprule
+name & equation & genus \\
+\midrule
+conic & $XY-Z^2$ & 0 \\
+elliptic & $X^2Z-Y^3+YZ^2$ & 1 \\
+Fermat cubic & $X^3+Y^3+Z^3$ & 1 \\
+Fermat quartic & $X^4+Y^4+Z^4$ & 3 \\
+\bottomrule
+\end{tabular}
+\end{center}
+Unless stated otherwise, runs use geodesic faces and one fixed random
+rotation of the seed (generator seed $12345$). The scripts that produce
+every table and figure are listed in the code availability statement.
+
+\subsection{Chart-flat versus geodesic faces}
+\label{sec:exp-faces}
+
+Our first implementation realized each face as a flat triangle in its own
+best-conditioned chart (\Cref{sec:faces}). We found the effect of that
+choice with a per-cell diagnostic, which records whether all ten faces
+of a cell were solved in the cell's own best-conditioned chart. On the
+elliptic curve at depth $12$, the bad-cell rate was $0.21\%$ among cells
+whose faces all used the cell's chart and $21\%$ among the others; at
+depth $14$, $0.11\%$ against $14\%$, and $0.10\%$ against $18\%$ for the
+Fermat quartic. More than $97\%$ of the bad cells were of the second
+kind. Geodesic faces remove the seams, and with them most failures
+(depth $14$, continuation only):
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{chart-flat faces} & \multicolumn{2}{c}{geodesic faces} \\
+\cmidrule(lr){2-3}\cmidrule(l){4-5}
+curve & bad cells & rate & bad cells & rate \\
+\midrule
+conic & 350 & $1.84\%$ & 2 & $0.010\%$ \\
+elliptic & 887 & $3.14\%$ & 34 & $0.120\%$ \\
+Fermat cubic & 2\,663 & $9.91\%$ & 22 & $0.080\%$ \\
+Fermat quartic & 4\,347 & $11.6\%$ & 53 & $0.136\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+Facets with a single crossing, which \Cref{prop:parity} rules out for
+closed facet boundaries, drop from $672$--$8\,463$ per run to $0$--$8$.
+Geodesic faces cost about $20$--$27\%$ more running time, spent in the
+evaluation of the cone parametrization.
+
+\subsection{Bad-cell rate}
+\label{sec:exp-badrate}
+
+\Cref{fig:badrate} shows the bad-cell rate for four curves of degree $2$ to
+$4$. The number of bad cells stays nearly constant with depth, between $2$
+and $59$ per run, while the number of cells that meet the curve doubles
+roughly every two levels; the rate therefore halves roughly every two
+levels: it is below $0.14\%$ at depth $14$ and below $0.08\%$ at depth $16$
+for all four curves. The tangency threshold
+combined with repair rounds lowers it further, by a factor of up to $6$,
+except for the conic at depths $14$ and $16$, where only two to five
+cells fail in either mode. For the elliptic curve, with the old
+chart-flat faces for reference:
+\begin{center}
+\small
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+depth & mode & leaves & good cells & bad cells & bad rate \\
+\midrule
+14 & chart-flat faces, continuation only & 327\,370 & 27\,397 & 887 & $3.136\%$ \\
+14 & continuation only & 326\,260 & 28\,278 & 34 & $0.120\%$ \\
+14 & + repair rounds (2) & 326\,260 & 28\,568 & 13 & $0.045\%$ \\
+14 & + tangency threshold $0.05$ & 505\,654 & 37\,490 & 7 & $0.019\%$ \\
+14 & + both & 505\,654 & 37\,490 & 7 & $0.019\%$ \\
+\midrule
+20 & chart-flat faces, continuation only & 4\,620\,102 & 222\,981 & 1\,348 & $0.601\%$ \\
+20 & continuation only & 4\,618\,522 & 224\,425 & 14 & $0.006\%$ \\
+20 & + repair rounds (2) & 4\,618\,522 & 224\,508 & 8 & $0.004\%$ \\
+20 & + tangency threshold $0.05$ & 6\,187\,942 & 305\,531 & 20 & $0.007\%$ \\
+20 & + both & 6\,187\,942 & 305\,556 & 18 & $0.006\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+At depth $20$ only $14$ of $224\,439$ cells fail with continuation alone.
+Repair rounds still halve that number, but the tangency threshold no
+longer helps: it adds a third more leaves, and the rate stays near
+$0.006\%$.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.78\linewidth]{figures/badrate.pdf}
+\caption{Percentage of touched cells whose extraction fails, against the
+refinement depth. Dashed lines with open markers: continuation alone.
+Solid lines: with tangency threshold $0.05$ and two repair rounds.}
+\label{fig:badrate}
+\end{figure}
+
+\paragraph{Causes of failure.}
+We recorded the reason for each failure at depth $14$, with continuation
+only, on the four curves ($114\,016$ good cells and $111$ bad ones):
+\begin{itemize}[itemsep=1pt]
+\item $88\%$ of the bad cells fail on a cycle with more than five nodes,
+  $10\%$ on an irregular facet and $2\%$ on node degree;
+\item the transversality score separates the two populations: its median
+  is $0.29$ on good cells on every curve, and between $0.014$ and $0.037$
+  on bad cells;
+\item $79\%$ of the bad cells have a score below $0.05$.
+\end{itemize}
+With geodesic faces, then, the remaining failures are near-tangencies of
+$C$ with faces of the mesh, which is what the tangency threshold and the
+repair rounds target.
+
+\subsection{Topology}
+
 \Cref{tab:rotations} repeats the construction for five random rotations
 of the seed. In all ten runs the genus estimate is exact, and the closed
-surface passes every check. The bad-cell rate varies moderately with the
-rotation. \Cref{app:measurements} gives further measurements: the
-bad-cell rate against depth, a breakdown of the causes of failure, and the
-accuracy of the extracted vertices.
+surface passes every check. The bad-cell rate varies with the rotation
+by a factor of up to $4$, but stays below $0.07\%$ (with chart-flat faces
+it was $1.0$--$1.9\%$ and $6.0$--$7.2\%$).
 
 \begin{table}[t]
 \centering
@@ -1346,142 +942,97 @@ the closed surface, which in all runs has no boundary and one component.}
 \toprule
 curve & bad cells (min--max) & genus estimate & closed $\chi$ & expected \\
 \midrule
-elliptic ($g=1$) & $1.00$--$1.90\%$ & $1$ in $5/5$ & $0$ in $5/5$ & $0$ \\
-Fermat quartic ($g=3$) & $6.03$--$7.21\%$ & $3$ in $5/5$ & $-4$ in $5/5$ & $-4$ \\
+elliptic ($g=1$) & $0.015$--$0.066\%$ & $1$ in $5/5$ & $0$ in $5/5$ & $0$ \\
+Fermat quartic ($g=3$) & $0.030$--$0.061\%$ & $3$ in $5/5$ & $-4$ in $5/5$ & $-4$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-% =====================================================================
-\section{Conclusion}
-% =====================================================================
-
-Stellar subdivision schemes reduce the correctness of Maubach bisection to
-three local lemmas about ordered stellar operations. On conforming
-meshes, the strong form of the invariant is balance. This connects the
-choice of a seed with the classes of triangulations studied by
-Dynnikov, Novikov and Gaifullin. For simply connected closed manifolds, a
-triangulation is a strongly compatible seed exactly when all its
-codimension-2 faces have even degree, and for $\CP^2$ Gaifullin's
-triangulation is the smallest such seed. Balance is also what lets
-pointerless LPT codes run over arbitrary seeds, with a table-driven,
-floating-point-free neighbor procedure.
-
-Several questions remain open:
-\begin{itemize}[itemsep=1pt]
-\item whether Stevenson's matching condition implies (MaubachA) after a
-  suitable choice between $T$ and $T_R$;
-\item pointerless codes for weakly compatible seeds and for the $N>d$
-  initializations of~\cite{dgs2025};
-\item small balanced seeds for other closed manifolds, for instance via
-  cross-flips~\cite{ikn2017,venturello2019};
-\item certification of the example's extraction.
-\end{itemize}
-
-\section*{Note on AI assistance}
-The implementation described here was developed with Claude (Anthropic)
-acting as a coding assistant, under the author's direction, review and
-testing. This manuscript was likewise prepared with Claude's assistance.
-
-\paragraph{Code availability.}
-The ordered-mesh data structures, the stellar subdivision algorithms and
-the example programs are part of VGTL~\cite{vgtl}. The LPT codes and
-their extension to balanced seeds, with the test suites of
-\Cref{sec:lpt}, are in the \texttt{lpt} repository~\cite{lptcode}. Scripts
-regenerating all figures and tables are in VGTL's
-\texttt{report/article/figures}.
-
-\paragraph{Funding.} This research received no specific funding.
-
-\bibliographystyle{plain}
-\bibliography{related_work}
-
-\appendix
-% =====================================================================
-\section{Further measurements for the example}
-\label{app:measurements}
-% =====================================================================
-
-All runs below use one fixed random rotation of the seed (generator seed
-$12345$).
-
-\paragraph{Bad-cell rate versus depth.}
-\Cref{fig:badrate} shows the bad-cell rate for four curves of degree $2$ to
-$4$. It decreases steadily, roughly halving every two levels. The
-tangency threshold combined with repair rounds lowers it by a factor of
-$1.5$ to $3$ at every depth. Curves of higher degree need a few more levels
-to reach the same rate. For the elliptic curve:
-\begin{center}
-\small
-\begin{tabular}{@{}llrrrr@{}}
-\toprule
-depth & mode & leaves & good cells & bad cells & bad rate \\
-\midrule
-14 & continuation only & 327\,370 & 27\,397 & 887 & $3.14\%$ \\
-14 & + repair rounds (2) & 327\,370 & 30\,605 & 730 & $2.33\%$ \\
-14 & + tangency threshold $0.05$ & 612\,978 & 42\,278 & 904 & $2.09\%$ \\
-14 & + both & 612\,978 & 45\,709 & 729 & $1.57\%$ \\
-\midrule
-20 & continuation only & 4\,620\,102 & 222\,981 & 1\,348 & $0.601\%$ \\
-20 & + repair rounds (2) & 4\,678\,426 & 226\,677 & 678 & $0.298\%$ \\
-20 & + tangency threshold $0.05$ & 6\,788\,844 & 335\,517 & 1\,260 & $0.374\%$ \\
-20 & + both & 6\,842\,524 & 339\,147 & 610 & $0.180\%$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.78\linewidth]{figures/badrate.pdf}
-\caption{Percentage of touched cells whose extraction fails, against the
-refinement depth. Dashed lines with open markers: continuation alone.
-Solid lines: with tangency threshold $0.05$ and two repair rounds.}
-\label{fig:badrate}
-\end{figure}
-
-\paragraph{Causes of failure.}
-We instrumented the extraction at depth $14$ ($136\,786$ touched cells over
-six curves, $8.0\%$ bad):
-\begin{itemize}[itemsep=1pt]
-\item $82\%$ of the bad cells fail on node degree, and $18\%$ on facets
-  with three crossings;
-\item cells with a facet touched at a single point are seven times more
-  likely to be bad;
-\item the transversality score separates good cells (median $0.21$) from
-  bad ones (median $0.12$), with a monotone gradient in bad rate across
-  score buckets.
-\end{itemize}
-Fubini--Study midpoints split cell volumes unevenly, but this imbalance
-does not correlate with bad cells.
-
 \paragraph{Genus of the raw extraction.}
-With the notation of \Cref{sec:example}:
+With the notation of \Cref{sec:topology}, tangency threshold $0.05$ and
+two repair rounds:
 \begin{center}
 \small
 \begin{tabular}{@{}lrrrrrrrr@{}}
 \toprule
 curve & depth & bad cells & pinched & $c$ & $b$ & $\chi$ & $g$ est. & $g$ \\
 \midrule
-conic $XY-Z^2$ & 14 & $367$ ($1.2\%$) & 3 & 2 & 41 & $-37$ & 0 & 0 \\
-elliptic & 14 & $729$ ($1.6\%$) & 8 & 4 & 84 & $-78$ & 1 & 1 \\
-elliptic, \Cref{fig:riemann}(a) & 18 & $701$ ($0.39\%$) & 3 & 2 & 104 & $-102$ & 1 & 1 \\
-Fermat cubic & 14 & $2\,438$ ($5.9\%$) & 35 & 8 & 253 & $-239$ & 1 & 1 \\
-Fermat quartic & 17 & $5\,388$ ($3.4\%$) & 36 & 11 & 656 & $-640$ & 3 & 3 \\
+conic $XY-Z^2$ & 14 & $4$ ($0.016\%$) & 0 & 1 & 2 & $0$ & 0 & 0 \\
+elliptic & 14 & $7$ ($0.019\%$) & 0 & 1 & 1 & $-1$ & 1 & 1 \\
+elliptic, \Cref{fig:riemann}(a) & 18 & $8$ ($0.005\%$) & 0 & 1 & 3 & $-3$ & 1 & 1 \\
+Fermat cubic & 14 & $20$ ($0.052\%$) & 0 & 1 & 6 & $-6$ & 1 & 1 \\
+Fermat quartic, \Cref{fig:riemann}(b) & 17 & $67$ ($0.042\%$) & 1 & 1 & 17 & $-21$ & 3 & 3 \\
 \bottomrule
 \end{tabular}
 \end{center}
-In every case the closed surface is connected, has no boundary, and has
-$\chi=2-2g$. The islands dropped by the closing step have $1$ to $18$
-faces, and Newton's method moved every cone apex onto the curve.
+The raw extraction is already connected in all five runs, and has a
+single pinched vertex in total, against $3$ to $36$ per run with
+chart-flat faces. In
+every case the closed surface is connected, has no boundary, and has
+$\chi=2-2g$, and Newton's method moved every cone apex onto the curve.
 
-\paragraph{Accuracy.}
-At depth $20$ we evaluated $|F|$, with unit-norm homogeneous
-representatives, at the $164\,390$ distinct extracted vertices. The median
-is $1.0\times10^{-16}$, the $99$th percentile $4.3\times10^{-13}$ and the
-maximum $9.8\times10^{-13}$. This measures the vertices only; the
-distance between the polygons and the curve was not measured.
+\subsection{Accuracy}
 
-\paragraph{Mesh size.}
+In the five runs above, $|F|$ at the extracted vertices, with unit-norm
+homogeneous representatives, has median at most $1.4\times10^{-16}$,
+$99$th percentile below $7.5\times10^{-16}$ and maximum below
+$7.2\times10^{-14}$. These are the crossings of $C$ with faces of the
+mesh, so they lie on the curve to working precision.
+
+Wirtinger's theorem gives a global check on the polygons between them.
+We measure the Fubini--Study area of the closed surface, fanning each
+polygon into triangles measured in the horizontal tangent space at one
+vertex, and compare it with $n\pi$:
+\begin{center}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+curve & depth & area$/n\pi$, raw & area$/n\pi$, closed \\
+\midrule
+conic & 14 & $0.99989$ & $1.00003$ \\
+elliptic & 14 & $1.00111$ & $1.00114$ \\
+elliptic & 18 & $1.00043$ & $1.00046$ \\
+Fermat cubic & 14 & $1.00078$ & $1.00142$ \\
+Fermat quartic & 17 & $1.00079$ & $1.00128$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+The area is within $0.15\%$ of the exact value in every run, and the
+error of the elliptic curve decreases from $0.11\%$ to $0.05\%$ between
+depths $14$ and $18$. The slight excess suggests that the polygons are
+somewhat folded rather than flat. \todo{check the area excess against
+depth on more curves.}
+
+\subsection{Cost}
+\label{sec:exp-cost}
+
+We measured one full incidence structure, VGTL's
+\texttt{nmt<4>}~\cite{vgtl}, against the pointerless leaf table of
+\Cref{sec:lpt}, on uniform refinement of Gaifullin's seed with no
+coordinates and no other data. Both hold exactly the same $108\cdot2^D$
+leaves.
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+& \multicolumn{2}{c}{\texttt{nmt<4>}} & & \multicolumn{2}{c}{pointerless} \\
+\cmidrule{2-3}\cmidrule{5-6}
+$D$ (leaves) & cells stored & bytes/leaf & & table & bytes/leaf \\
+\midrule
+8 ($27\,648$) & $55\,188$ & 222 & & 0.5 MB & 19.5 \\
+12 ($442\,368$) & $884\,628$ & 222 & & 8.6 MB & 19.5 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\texttt{nmt<4>} keeps every cell ever created, so that coarsening remains
+possible, together with all faces; this costs $222$ bytes per leaf. The
+pointerless table stores one 64-bit code per leaf at load factor $0.41$,
+i.e.\ $19.5$ bytes per leaf. That is about $11\times$ less than this full
+incidence structure, and about $2\times$ less than the $40$-byte compact
+structure estimated in \Cref{sec:lpt}. Neither figure includes per-vertex
+data such as coordinates, which both approaches need when geometry is
+required.
+
 Continuation recovers the same leaf set and bad cells as a global scan
 of all $108$ seed hierarchies with the same test, on six curves at depths
 $8$, $12$ and $14$. It yields meshes $3$--$6$ times smaller at depth $14$
@@ -1489,5 +1040,138 @@ than an earlier criterion that refines all of $\CP^2$. The pointerless
 mesh reached depth $20$, with $6.8$ million leaves, on a machine with
 $7.2$\,GB of RAM, where the \texttt{nmt<4>}-based implementation had
 peaked at 4--5\,GB around depth $18$.
+\todo{E2: running time and peak memory per depth and curve, broken down
+into refinement, crossings, extraction and closing.}
+\todo{re-verify the leaf-set equality and the mesh-size ratio with geodesic
+faces, on the four smooth curves only (one of the six was reducible).}
+
+\subsection{Bernstein enclosure}
+\label{sec:exp-bernstein}
+
+\todo{E6: \texttt{--bernstein} against the default, depths $14$--$20$,
+elliptic and quartic, with and without tangency threshold and repair
+rounds: bad-cell rate, leaves, time, memory.}
+
+\subsection{Comparison with an affine chart}
+\label{sec:exp-affine}
+
+\todo{E1, the main experiment. Baseline in the style
+of~\cite{weiglebanks1996}: the same code with a different geometry.
+\begin{itemize}[itemsep=1pt]
+\item Seed: the box $[-R,R]^4$ in $(\mathrm{Re}\,x,\mathrm{Im}\,x,\mathrm{Re}\,y,\mathrm{Im}\,y)$
+  of the chart $Z=1$, Kuhn-triangulated (the reflected $2^4$ block is
+  balanced, so the pointerless mesh runs unchanged); affine midpoints.
+\item Coverage: Fubini--Study area of the extraction divided by
+  $n\cdot\area(\text{line})$ (Wirtinger), as a function of $R$.
+\item Topology: closed surface with $\chi=2-2g$ in $\CP^2$; in the box,
+  boundary loops against the $n$ points at infinity.
+\item Cost at equal resolution: refine until the Fubini--Study diameter of
+  the cells meeting $C$ is below $h$; compare leaves, time and bad-cell rate.
+\item Distortion: Fubini--Study edge-ratio histograms.
+\item $R\in\{2,4,8,16\}$; elliptic and Fermat quartic; one or two rotations.
+\end{itemize}
+Discuss: covering $\CP^2$ by three charts would require stitching the
+overlaps, which is what the intrinsic method avoids.}
+
+\subsection{Comparison with $\CP^1\times\CP^1$}
+\label{sec:exp-s2s2}
+
+\todo{E3: the same curves in the product compactification, seeded by the
+product of two octahedra (balanced, staircase triangulation). The closure
+of $w^2=z^3-z$ has a cusp at $(\infty,\infty)$ there, but not in $\CP^2$.
+Report bad cells near the cusp.}
+
+% =====================================================================
+\section{Visualization}
+\label{sec:viz}
+% =====================================================================
+
+The triangulation lives in $\CP^2$; to draw it, we map it to $\R^3$.
+We use two maps.
+\begin{itemize}[itemsep=2pt]
+\item \emph{Flat charts.} A point of the chart $U_k$ with coordinates
+  $(a,b)$ is drawn at $(\mathrm{Re}\,a,\mathrm{Im}\,a,\mathrm{Re}\,b)$,
+  i.e.\ as the graph of $\mathrm{Re}\,b$ over the $a$-plane, clipped to a
+  box. The chart is chosen per polygon, as the best-conditioned chart
+  of its vertices, or fixed for the whole picture. A per-polygon choice
+  keeps every polygon bounded, but adjacent polygons drawn in different
+  charts do not match: the picture is a union of pieces of three graphs.
+  A fixed chart gives one consistent graph, but loses the curve near the
+  line at infinity of that chart. \Cref{fig:riemann}(a) uses the fixed
+  chart $Z=1$.
+\item \emph{Dutter's map}~\cite{dutter2026}, after
+  Kranich~\cite{kranich2016}, maps all of $\CP^2$ continuously into a
+  bounded region of $\R^3$, with no chart. It shows the whole closed
+  surface (\Cref{fig:riemann}(b)), at the cost of self-intersections in
+  the image.
+\end{itemize}
+
+\begin{figure}[t]
+\centering
+\begin{minipage}[b]{0.50\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/elliptic_flat.png}\\[2pt]
+{\small (a)}
+\end{minipage}\hfill
+\begin{minipage}[b]{0.40\linewidth}\centering
+\includegraphics[width=\linewidth]{figures/quartic_alpha.png}\\[2pt]
+{\small (b)}
+\end{minipage}
+\caption{Curves triangulated inside $\CP^2$.
+(a)~The elliptic curve $X^2Z-Y^3+YZ^2=0$, i.e.\ $w^2=z^3-z$ in the chart
+$Z=1$ ($w=X$, $z=Y$), displayed as the graph
+$(\mathrm{Re}\,z,\mathrm{Im}\,z,\mathrm{Re}\,w)$, clipped to
+$|\mathrm{Re}\,z|,|\mathrm{Im}\,z|\le2$ and $|\mathrm{Re}\,w|\le3$; depth $18$,
+$8$ bad cells ($0.005\%$).
+(b)~The Fermat quartic $X^4+Y^4+Z^4=0$ (genus $3$) under Dutter's
+chart-free map $\tilde\alpha:\CP^2\to\R^3$~\cite{dutter2026}, colored by
+distance to the center and drawn semi-transparent; depth $17$, $67$ bad
+cells ($0.042\%$). Both surfaces were closed as described in
+\Cref{sec:topology}. The few faint marks are discontinuities of the
+interpolated normals, at closing cones and at thin polygons of the
+extraction, not holes.}
+\label{fig:riemann}
+\end{figure}
+
+% =====================================================================
+\section{Limitations and conclusion}
+% =====================================================================
+
+We triangulate smooth plane curves intrinsically in $\CP^2$ by adaptive
+Maubach bisection of a balanced seed, Newton crossings on $2$-faces, and
+continuation through a pointerless mesh. Working in $\CP^2$ removes charts,
+cuts and the special role of infinity. Balance of the seed is what makes
+both bisection and the pointerless neighbor procedure work on a closed
+manifold.
+
+The method has clear limits.
+\begin{itemize}[itemsep=1pt]
+\item It is not certified. The bad-cell rate decreases with depth but does
+  not vanish, and the topology is checked only a posteriori, through
+  necessary conditions.
+\item It assumes a smooth curve. Singular curves need a different
+  extraction near the singular points.
+\item Continuation can miss a small component of $C\cap c$ that meets no
+  $2$-face of $c$. A reducible curve needs one starting cell per
+  component.
+\end{itemize}
+Open directions are the certification of the extraction, curves of high
+degree, and other closed manifolds that admit small balanced seeds.
+
+\section*{Note on AI assistance}
+The implementation described here was developed with Claude (Anthropic)
+acting as a coding assistant, under the author's direction, review and
+testing. This manuscript was likewise prepared with Claude's assistance.
+
+\paragraph{Code availability.}
+The mesh data structures and the example programs are part of
+VGTL~\cite{vgtl}. The LPT codes and their extension to balanced seeds,
+with the test suites of \Cref{sec:lpt}, are in the \texttt{lpt}
+repository~\cite{lptcode}. Scripts regenerating all figures and tables
+are in VGTL's \texttt{report/article/figures}.
+
+\paragraph{Funding.} This research received no specific funding.
+
+\bibliographystyle{plain}
+\bibliography{related_work}
 
 \end{document}

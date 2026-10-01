@@ -1,0 +1,5 @@
+curve,function,depth,ok,bad,irregular_facet,node_degree,bad_cycle,tv_good_median,tv_bad_median,bad_frac_tv_below_0.05
+conic,0,14,19077,2,0,0,2,0.294539,0.037138,1
+elliptic,5,14,28278,34,5,2,27,0.288785,0.0354421,0.823529
+fermat_cubic,1,14,27619,22,0,0,22,0.287642,0.0138068,0.818182
+fermat_quartic,3,14,39042,53,6,0,47,0.290416,0.0216794,0.754717
