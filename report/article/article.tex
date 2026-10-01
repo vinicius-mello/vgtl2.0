@@ -79,8 +79,10 @@ faces glue exactly; on our test curves, fewer than $0.14\%$ of the cells
 that meet the curve then fail at depth $14$, against $1.8$--$11.6\%$ with
 faces that are flat in affine charts, and the area of the result agrees
 with Wirtinger's theorem to within $0.15\%$.
-\todo{one sentence with the headline numbers of the affine-chart
-comparison (E1).}
+Compared at equal resolution with the same pipeline run on a box in an
+affine chart, the intrinsic mesh covers the whole curve, while a box of
+half-width $16$ still misses $0.6$--$1.3\%$ of its area and already needs
+more cells.
 \end{abstract}
 
 \tableofcontents
@@ -158,7 +160,10 @@ We triangulate $\CP^2$ itself and refine it adaptively around $C$.
   characteristic, together with a global accuracy check by Wirtinger's
   theorem.
 \item An experimental comparison with the affine-chart approach on the
-  same code base. \todo{state outcome once E1 is done.}
+  same code base, at equal Fubini--Study resolution: a box in a chart
+  misses neighbourhoods of the points at infinity, its missing area
+  decreasing only like $1/R^2$ with its half-width $R$, and at $R=16$ it
+  already uses more cells than the whole of $\CP^2$.
 \end{enumerate}
 
 % =====================================================================
@@ -351,8 +356,10 @@ We use Gaifullin's coordinates~\cite{gaifullin2009}, moved by a random
 unitary change of basis of $\C^3$ to avoid special alignments between the
 curve and the seed. Each new vertex is placed at the Fubini--Study
 geodesic midpoint of the split edge, after aligning the phases of the two
-homogeneous representatives. Coordinates are cached by vertex
-identifier.
+homogeneous representatives. The coordinates of a cell's vertices are
+not stored: they are recomputed from the seed along the cell's path in
+the hierarchy, deterministically, so every cell sees the same point for
+the same vertex.
 
 \subsection{Pointerless codes on balanced seeds}
 \label{sec:lpt}
@@ -1060,23 +1067,70 @@ $0.87$\,GB at depth $20$.
 \subsection{Comparison with an affine chart}
 \label{sec:exp-affine}
 
-\todo{E1, the main experiment. Baseline in the style
-of~\cite{weiglebanks1996}: the same code with a different geometry.
+The most direct alternative is to mesh $\{F(x,y,1)=0\}$ in an affine
+chart, as Weigle and Banks do on uniform grids of
+$\R^4$~\cite{weiglebanks1996}. We built this baseline from the same code,
+changing only the geometry. The seed is Kuhn's triangulation of the box
+$[-R,R]^4$ in the coordinates $(\mathrm{Re}\,x,\mathrm{Im}\,x,\mathrm{Re}\,y,
+\mathrm{Im}\,y)$: $24$ cells, colour-ordered, with boundary, which the
+pointerless mesh accepts once the seed is a parameter. New vertices are
+affine midpoints, and every face is flat in the one chart, so the faces
+glue exactly here as well. Continuation, extraction and the topological
+checks are unchanged. The curve is moved by the same random unitary
+transformation that moves Gaifullin's seed in the intrinsic runs; without
+it, a curve with real coefficients has its real locus inside a union of
+faces of the axis-aligned box, and extraction degenerates.
+
+To compare the two meshes at equal resolution, we refine every cell that
+meets $C$ until its Fubini--Study diameter is below $h$. With $h=0.2$:
+\begin{center}
+\small
+\begin{tabular}{@{}llrrrrrr@{}}
+\toprule
+curve & mesh & leaves & meeting $C$ & bad & $b$ & area$/n\pi$ & time (s) \\
+\midrule
+elliptic & $\CP^2$ & 1\,023\,146 & 59\,287 & 16 & 7 & $1.000$ & $28$ \\
+ & box, $R=2$ & 322\,516 & 19\,814 & 9 & 5 & $0.784$ & $11$ \\
+ & box, $R=4$ & 562\,258 & 33\,166 & 9 & 5 & $0.923$ & $20$ \\
+ & box, $R=8$ & 810\,518 & 47\,642 & 12 & 7 & $0.981$ & $31$ \\
+ & box, $R=16$ & 1\,065\,792 & 62\,365 & 12 & 7 & $0.994$ & $45$ \\
+\midrule
+Fermat quartic & $\CP^2$ & 1\,396\,928 & 85\,555 & 68 & 25 & $0.999$ & $41$ \\
+ & box, $R=2$ & 401\,822 & 25\,735 & 46 & 14 & $0.711$ & $18$ \\
+ & box, $R=4$ & 753\,240 & 46\,011 & 54 & 18 & $0.906$ & $35$ \\
+ & box, $R=8$ & 1\,143\,860 & 67\,737 & 57 & 19 & $0.967$ & $57$ \\
+ & box, $R=16$ & 1\,531\,978 & 89\,821 & 57 & 20 & $0.987$ & $85$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+Here $b$ counts the boundary loops of the raw extraction: holes left by
+bad cells and, in the box, the loops where $C$ leaves it. The runs with
+$h=0.3$ (in \texttt{affine.csv}) show the same pattern:
 \begin{itemize}[itemsep=1pt]
-\item Seed: the box $[-R,R]^4$ in $(\mathrm{Re}\,x,\mathrm{Im}\,x,\mathrm{Re}\,y,\mathrm{Im}\,y)$
-  of the chart $Z=1$, Kuhn-triangulated (the reflected $2^4$ block is
-  balanced, so the pointerless mesh runs unchanged); affine midpoints.
-\item Coverage: Fubini--Study area of the extraction divided by
-  $n\cdot\area(\text{line})$ (Wirtinger), as a function of $R$.
-\item Topology: closed surface with $\chi=2-2g$ in $\CP^2$; in the box,
-  boundary loops against the $n$ points at infinity.
-\item Cost at equal resolution: refine until the Fubini--Study diameter of
-  the cells meeting $C$ is below $h$; compare leaves, time and bad-cell rate.
-\item Distortion: Fubini--Study edge-ratio histograms.
-\item $R\in\{2,4,8,16\}$; elliptic and Fermat quartic; one or two rotations.
+\item \emph{Coverage.} The box misses neighbourhoods of the points of $C$
+  at infinity. The missing area falls roughly like $1/R^2$, from $22\%$ at
+  $R=2$ to $0.6\%$ at $R=16$ for the elliptic curve, and from $29\%$ to
+  $1.3\%$ for the quartic. The intrinsic mesh recovers the whole area,
+  within $0.13\%$ at $h=0.2$ and $0.26\%$ at $h=0.3$, the difference being
+  the holes left by bad cells.
+\item \emph{Cost.} Points far out in the chart are close together in
+  $\CP^2$, so a box large enough to cover most of the curve needs many
+  levels of refinement near its boundary. At $R=16$ the box already uses
+  $4$--$10\%$ more leaves than the intrinsic mesh of all of $\CP^2$ at
+  $h=0.2$, and $33$--$45\%$ more at $h=0.3$.
+\item \emph{Topology.} The box output is a surface with boundary, whose
+  genus can be inferred only when the loops around infinity bound discs,
+  and which cannot be closed by capping holes, since some boundary loops
+  are not holes. The intrinsic output closes into a surface with
+  $\chi=2-2g$.
 \end{itemize}
-Discuss: covering $\CP^2$ by three charts would require stitching the
-overlaps, which is what the intrinsic method avoids.}
+Bad cells are rare in both meshes. In one chart, flat faces glue just as
+geodesic faces do in $\CP^2$, which confirms that the gluing of faces, not
+the use of charts as such, is what matters for extraction. Covering all
+of $\CP^2$ with charts would take three of them, and their meshes would
+have to be stitched along the overlaps, where the faces are flat in
+different charts and no longer glue: precisely the situation that
+geodesic faces avoid.
 
 \subsection{Comparison with $\CP^1\times\CP^1$}
 \label{sec:exp-s2s2}

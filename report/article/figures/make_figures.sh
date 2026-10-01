@@ -5,7 +5,7 @@
 #             interactively, recorded below as CAMERA=x,y,z,rx,ry,rz,ortho)
 #   Figure 3: badrate_sweep.sh + fig_badrate.py
 #   Tables:   causes_sweep.sh, genus_sweep.sh, rotation_sweep.sh, modes_table.sh,
-#             continuation_check.sh, cost_sweep.sh, area_sweep.sh
+#             continuation_check.sh, cost_sweep.sh, area_sweep.sh, affine_sweep.sh
 # (badrate_chartflat.csv / rotations_chartflat.csv keep the measurements
 #  made with the old chart-flat faces, before geodesic faces became default.)
 # Also prints the genus check of both Figure-2 meshes.
@@ -46,3 +46,4 @@ $PY fig_badrate.py
 ./continuation_check.sh
 ./cost_sweep.sh
 ./area_sweep.sh
+./affine_sweep.sh
