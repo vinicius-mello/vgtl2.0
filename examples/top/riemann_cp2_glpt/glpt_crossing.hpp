@@ -269,6 +269,163 @@ inline int compute_face_crossing(const pt3 p[3], pt3 out_pts[2], double out_bary
 	return nfound;
 }
 
+// --- Geodesic faces (the DEFAULT since 2026-10-01; --chart-flat-faces
+// restores the old realization): a chart-free, globally consistent
+// realization of every 2-face.
+//
+// The old realization took each face as the FLAT triangle in the
+// face's own best chart. "Flat" depends on the chart, so two faces that
+// share an edge but use different charts see that edge as two different
+// curves, tetrahedral boundaries do not close, and crossing parity on a
+// facet breaks. Measured: bad-cell rate 0.1-0.2% when all faces of a cell
+// share the cell's chart, 14-21% otherwise. With geodesic faces the
+// overall bad-cell rate at depth 14 fell from 3-12% to ~0.13% on four
+// smooth curves, and facets with a single crossing all but vanished
+// (closed tetrahedral boundaries meet the closed curve C an even number
+// of times).
+//
+// Here a face with vertices A,B,C, sorted by global id, is the geodesic
+// cone from its lowest-id vertex A:
+//     q(t)   = (1-t) B + t align(B,C)
+//     v(s,t) = (1-s) A + s align(A, q(t)),     (s,t) in [0,1]^2,
+// with unit representatives. Every edge is a Fubini-Study geodesic,
+// parametrized as [(1-u) X + u align(X,Y)] from its lower-id endpoint X,
+// whichever face it is seen from, so faces glue exactly along edges and
+// fs_midpoint (which is u=1/2 of that same parametrization) lies on its
+// edge. Barycentric-like coordinates (sorted order) are
+//     l_A = 1-s,  l_B = s(1-t),  l_C = s t,
+// which agree with the edge parametrizations on the boundary.
+bool g_geodesic_faces=true; // default since 2026-10-01; --chart-flat-faces restores the old realization
+
+struct geo_face { pt3 A,B,C; };
+inline geo_face make_geo_face(const pt3& A, const pt3& B, const pt3& C) {
+	geo_face g; g.A=normalize3(A); g.B=normalize3(B); g.C=normalize3(C); return g;
+}
+inline pt3 geo_point(const geo_face& g, double s, double t) {
+	pt3 Ct=align_phase(g.B,g.C), q;
+	for(int k=0;k<3;++k) q[k]=(1.0-t)*g.B[k]+t*Ct[k];
+	pt3 qa=align_phase(g.A,q), v;
+	for(int k=0;k<3;++k) v[k]=(1.0-s)*g.A[k]+s*qa[k];
+	return v;
+}
+//! v(s,t) and its two partial derivatives, analytically. With
+//! z = <A,q>, u = z/|z| (the alignment phase) and qa = q u:
+//!   dv/ds = qa - A,
+//!   dv/dt = s (q' u + q u'),  q' = align(B,C) - B,  z' = <A,q'>,
+//!   u' = (z' - u Re(conj(u) z')) / |z|.
+inline void geo_point_derivs(const geo_face& g, double s, double t, pt3& v, pt3& vs, pt3& vt) {
+	pt3 Ct=align_phase(g.B,g.C), q, dq;
+	for(int k=0;k<3;++k) { q[k]=(1.0-t)*g.B[k]+t*Ct[k]; dq[k]=Ct[k]-g.B[k]; }
+	cx z=hdot(g.A,q), dz=hdot(g.A,dq);
+	double az=std::abs(z);
+	cx u = (az>1e-14) ? z/az : cx(1,0);
+	cx du = (az>1e-14) ? (dz - u*std::real(std::conj(u)*dz))/az : cx(0,0);
+	for(int k=0;k<3;++k) {
+		cx qa=q[k]*u;
+		v[k]=(1.0-s)*g.A[k]+s*qa;
+		vs[k]=qa-g.A[k];
+		vt[k]=s*(dq[k]*u+q[k]*du);
+	}
+}
+//! Complex gradient of the homogeneous F at v, and the bilinear
+//! directional derivative grad F(v) . w.
+inline void geo_grad(const pt3& v, cx gF[3]) {
+	gF[0]=eval_poly3(g_Fx,v[0],v[1],v[2]); gF[1]=eval_poly3(g_Fy,v[0],v[1],v[2]); gF[2]=eval_poly3(g_Fz,v[0],v[1],v[2]);
+}
+inline cx geo_dir(const cx gF[3], const pt3& w) { return gF[0]*w[0]+gF[1]*w[1]+gF[2]*w[2]; }
+//! |F(v)| / |v|^n: the residual of the normalized point.
+inline double geo_resid(const pt3& v) {
+	return std::abs(eval_poly3(g_F,v[0],v[1],v[2]))/std::pow(hnorm(v),(double)g_F.d);
+}
+//! Newton on G(s,t)=F(v(s,t)) as a real 2x2 system with the analytic
+//! Jacobian (F homogeneous, so the zeros of F(v) and F(v/|v|) agree).
+//! Accepts a root inside [0,1]^2 (up to 1e-6).
+inline bool geo_newton(const geo_face& g, double& s, double& t) {
+	pt3 v,vs,vt; cx gF[3];
+	for(int it=0; it<40; ++it) {
+		geo_point_derivs(g,s,t,v,vs,vt);
+		cx G=eval_poly3(g_F,v[0],v[1],v[2]);
+		if(std::abs(G)/std::pow(hnorm(v),(double)g_F.d)<1e-15) break;
+		geo_grad(v,gF);
+		cx Gs=geo_dir(gF,vs), Gt=geo_dir(gF,vt);
+		double j00=Gs.real(), j01=Gt.real(), j10=Gs.imag(), j11=Gt.imag();
+		double det=j00*j11-j01*j10;
+		if(std::fabs(det)<1e-300) return false;
+		s-=( G.real()*j11-j01*G.imag())/det;
+		t-=(-G.real()*j10+j00*G.imag())/det;
+		if(std::fabs(s)>10||std::fabs(t)>10) return false;
+	}
+	if(geo_resid(geo_point(g,s,t))>1e-11) return false;
+	const double tol=1e-6;
+	return s>=-tol && s<=1+tol && t>=-tol && t<=1+tol;
+}
+//! Sorted order (by id) of a face's three corners: ord[0] = lowest id.
+inline void geo_sort(const int id[3], int ord[3]) {
+	ord[0]=0; ord[1]=1; ord[2]=2;
+	for(int i=0;i<3;++i) for(int j=i+1;j<3;++j) if(id[ord[j]]<id[ord[i]]) std::swap(ord[i],ord[j]);
+}
+//! Same contract as compute_face_crossing (bary relative to p[] in the
+//! GIVEN order), on the geodesic-cone realization.
+inline int compute_face_crossing_geo(const pt3 p[3], const int id[3], pt3 out_pts[2], double out_bary[2][3]) {
+	int ord[3]; geo_sort(id,ord);
+	geo_face g=make_geo_face(p[ord[0]],p[ord[1]],p[ord[2]]);
+	// seeds in sorted barycentrics (lA,lB,lC): the zero of the linear
+	// interpolant of F at the phase-aligned corners, plus 4 fixed points
+	double seeds[5][2]; int nseeds=0;
+	{
+		pt3 Bt=align_phase(g.A,g.B), Ct=align_phase(g.A,g.C);
+		cx F0=eval_poly3(g_F,g.A[0],g.A[1],g.A[2]), F1=eval_poly3(g_F,Bt[0],Bt[1],Bt[2]), F2=eval_poly3(g_F,Ct[0],Ct[1],Ct[2]);
+		cx a1=F1-F0, a2=F2-F0;
+		double m00=a1.real(), m01=a2.real(), m10=a1.imag(), m11=a2.imag();
+		double det=m00*m11-m01*m10;
+		if(std::fabs(det)>1e-14) {
+			seeds[nseeds][0]=(-F0.real()*m11+m01*F0.imag())/det;
+			seeds[nseeds][1]=(-m00*F0.imag()+F0.real()*m10)/det;
+			++nseeds;
+		}
+	}
+	static const double extra_seeds[4][2]={ {1/3.,1/3.},{0.1,0.1},{0.8,0.1},{0.1,0.8} };
+	for(int k=0;k<4;++k) { seeds[nseeds][0]=extra_seeds[k][0]; seeds[nseeds][1]=extra_seeds[k][1]; ++nseeds; }
+	int nfound=0; double found_l[2][3];
+	for(int k=0; k<nseeds && nfound<2; ++k) {
+		double lB=seeds[k][0], lC=seeds[k][1];
+		double s=lB+lC, t=(s>1e-12)? lC/s : 0.5;
+		if(!geo_newton(g,s,t)) continue;
+		s=std::min(1.0,std::max(0.0,s)); t=std::min(1.0,std::max(0.0,t));
+		double l[3]={1.0-s, s*(1.0-t), s*t};
+		bool dup=false;
+		for(int r=0;r<nfound;++r) if(std::fabs(found_l[r][1]-l[1])<1e-7 && std::fabs(found_l[r][2]-l[2])<1e-7) dup=true;
+		if(dup) continue;
+		for(int q=0;q<3;++q) found_l[nfound][q]=l[q];
+		out_pts[nfound]=normalize3(geo_point(g,s,t));
+		for(int q=0;q<3;++q) out_bary[nfound][ord[q]]=l[q]; // back to the caller's order
+		++nfound;
+	}
+	return nfound;
+}
+//! Transversality score on the geodesic realization: the same quantity
+//! as crossing_transversality (Jacobian determinant of (Re F, Im F) on the
+//! face, normalized to [0,1]), with the face's tangent vectors at the
+//! root projected orthogonally to the root's own line.
+inline double crossing_transversality_geo(const pt3 face_pts[3], const int face_ids[3], const double bary[3]) {
+	int ord[3]; geo_sort(face_ids,ord);
+	geo_face g=make_geo_face(face_pts[ord[0]],face_pts[ord[1]],face_pts[ord[2]]);
+	double lA=bary[ord[0]], lC=bary[ord[2]];
+	double s=1.0-lA; if(s<1e-9) return 1.0; // at the apex: a vertex node, no tangency signal
+	double t=std::min(1.0,std::max(0.0,lC/s));
+	pt3 v, Ts, Tt; geo_point_derivs(g,s,t,v,Ts,Tt);
+	double vv=hdot(v,v).real();
+	cx cs=hdot(Ts,v)/vv, ct=hdot(Tt,v)/vv;
+	for(int k=0;k<3;++k) { Ts[k]-=cs*v[k]; Tt[k]-=ct*v[k]; }
+	cx gF[3]; geo_grad(v,gF);
+	cx w1(0,0), w2(0,0); double g2=0;
+	for(int k=0;k<3;++k) { w1+=gF[k]*Ts[k]; w2+=gF[k]*Tt[k]; g2+=std::norm(gF[k]); }
+	double n1=hnorm(Ts), n2=hnorm(Tt);
+	if(n1<1e-14||n2<1e-14) return 1.0;
+	if(g2<1e-300) return 0.0;
+	return std::abs(std::imag(std::conj(w1)*w2))/(n1*n2*g2);
+}
+
 // --- Face cache, keyed by the sorted GLOBAL vertex id triple (see this
 // file's header comment for why: the same physical 2-face is reached
 // from potentially many different 4-cells, and they must all agree).
@@ -378,7 +535,8 @@ class face_crossing_cache {
 
 			face_result fr;
 			pt3 out_pts[2]; double out_bary[2][3];
-			int nr = compute_face_crossing(p, out_pts, out_bary);
+			int nr = g_geodesic_faces ? compute_face_crossing_geo(p, id, out_pts, out_bary)
+			                          : compute_face_crossing(p, out_pts, out_bary);
 			fr.nroots = (unsigned char)nr;
 			fr.root_idx = nr>0 ? (int)root_pts_.size() : -1;
 			for(int r=0;r<nr;++r) {

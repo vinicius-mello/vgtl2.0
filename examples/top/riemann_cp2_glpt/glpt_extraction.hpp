@@ -162,7 +162,8 @@ inline void extract_cell(const pt3 pts[glpt::DIM+1], const int ids[glpt::DIM+1],
 			for(int k=0;k<3;++k) { face_pts[k]=pts[GLPT_CELL_FACES[f][k]]; face_ids[k]=ids[GLPT_CELL_FACES[f][k]]; }
 			const face_result& fr = fcache.get(face_pts, face_ids);
 			for(int r=0;r<fr.nroots;++r) {
-				double tv = crossing_transversality(face_pts, fcache.root_bary(fr,r));
+				double tv = g_geodesic_faces ? crossing_transversality_geo(face_pts, face_ids, fcache.root_bary(fr,r))
+				                             : crossing_transversality(face_pts, fcache.root_bary(fr,r));
 				if(tv<out.min_transversality) out.min_transversality=tv;
 				crossing_node nd;
 				compute_crossing_node(face_ids, fcache.root_bary(fr,r), make_face_key(face_ids[0],face_ids[1],face_ids[2]), r,

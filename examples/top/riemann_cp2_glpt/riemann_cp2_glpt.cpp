@@ -47,6 +47,13 @@
 // suspiciously near-tangent one gets bisected further first, up to
 // --tangency-extra-depth beyond --depth, instead of waiting for
 // extraction to actually fail before --repair-rounds can act on it.
+// FACES (2026-10-01): every 2-face is realized as the Fubini-Study
+// geodesic cone from its lowest-id vertex (glpt_crossing.hpp, "Geodesic
+// faces"), so faces glue exactly along geodesic edges; this cut the
+// bad-cell rate by 20-80x. --chart-flat-faces restores the old
+// realization (each face flat in its own best chart), which --bernstein
+// still requires. --certify (glpt_certify.hpp) is a measurement
+// prototype of certified per-cell tests.
 // Deliberately NOT ported: riemann_cp2.cpp's --onion mode (flat+alpha
 // are enough to see the extracted surface; onion is deferred, not
 // required).
@@ -64,6 +71,7 @@
 #include <random>
 #include "glpt_extraction.hpp"
 #include "glpt_bernstein.hpp"
+#include "glpt_certify.hpp"
 #include "glpt_tree.hpp"
 
 using namespace std;
@@ -536,6 +544,7 @@ int main(int argc, char* argv[]) {
 	bool generic=false;
 	unsigned generic_seed=12345;
 	bool bernstein_selftest_flag=false;
+	bool certify_selftest_flag=false;
 	int repair_rounds=0;
 	int repair_extra_depth=4;
 	bool legacy_priority_refine=false;
@@ -561,6 +570,11 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--bernstein") { g_bernstein=true; }
 		else if(arg=="--bernstein-level" && i+1<argc) { g_bernstein=true; g_bernstein_level=atoi(argv[++i]); }
 		else if(arg=="--bernstein-selftest") { bernstein_selftest_flag=true; }
+		else if(arg=="--certify") { g_certify=true; }
+		else if(arg=="--geodesic-faces") { g_geodesic_faces=true; } // the default; accepted for old command lines
+		else if(arg=="--chart-flat-faces") { g_geodesic_faces=false; }
+		else if(arg=="--certify-level" && i+1<argc) { g_certify=true; g_certify_level=atoi(argv[++i]); }
+		else if(arg=="--certify-selftest") { g_certify=true; certify_selftest_flag=true; }
 		else if(arg=="--repair-rounds" && i+1<argc) { repair_rounds=atoi(argv[++i]); }
 		else if(arg=="--repair-extra-depth" && i+1<argc) { repair_extra_depth=atoi(argv[++i]); }
 		else if(arg=="--tangency-threshold" && i+1<argc) { tangency_threshold=atof(argv[++i]); }
@@ -570,7 +584,7 @@ int main(int argc, char* argv[]) {
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
 				<<"[--flat] [--alpha-projection] [--cutoff X] [--chart N] [--flat-swap] [--genus-check] [--close] [--generic] [--generic-seed N] [--proximity] "
-				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] "
+				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--certify] [--certify-level N] [--certify-selftest] [--geodesic-faces | --chart-flat-faces] "
 				<<"[--repair-rounds N] [--repair-extra-depth N] "
 				<<"[--tangency-threshold X] [--tangency-extra-depth N] [--legacy-priority-refine] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
@@ -588,6 +602,13 @@ int main(int argc, char* argv[]) {
 	}
 	set_curve(cat[function_idx].F);
 
+	if(certify_selftest_flag) return certify_selftest() ? 0 : 1;
+	if(g_geodesic_faces && g_bernstein) {
+		cerr<<"--bernstein assumes chart-flat faces: pass --chart-flat-faces with it (geodesic faces are the default)"<<endl;
+		return 1;
+	}
+	if(g_geodesic_faces && g_certify)
+		cerr<<"note: --certify tests the cell's chart-flat simplex, which does not match the default geodesic faces"<<endl;
 	if(bernstein_selftest_flag) {
 		bernstein_selftest();
 		return 0;
@@ -598,6 +619,7 @@ int main(int argc, char* argv[]) {
 	if(generic) cout<<" (seed="<<generic_seed<<")";
 	cout<<"  proximity="<<(g_proximity?"on":"off");
 	cout<<"  bernstein="<<(g_bernstein?"on":"off");
+	cout<<"  faces="<<(g_geodesic_faces?"geodesic":"chart-flat");
 	if(g_bernstein) cout<<" (level="<<g_bernstein_level<<")";
 	cout<<endl;
 
@@ -777,7 +799,18 @@ int main(int argc, char* argv[]) {
 	vector<vec3d> flat_verts;
 	vector<vector<int> > flat_faces;
 
+	// --certify (glpt_certify.hpp): certified per-cell tests, tabulated
+	// against the heuristic extraction's own good/bad verdict.
+	struct CertStats {
+		long arc[2][3];      // [extraction ok?][cert_result] for cells with an arc
+		long noarc[3];       // [cert_result] for leaves without an arc
+		long chartmix[2][2]; // [extraction ok?][some face solved in another chart?]
+		std::vector<double> margin[2]; // GRAPH-test margin, [extraction ok?]
+		void clear() { for(int a=0;a<2;++a) for(int b=0;b<3;++b) arc[a][b]=0; for(int b=0;b<3;++b) noarc[b]=0; for(int a=0;a<2;++a) for(int b=0;b<2;++b) chartmix[a][b]=0; margin[0].clear(); margin[1].clear(); }
+	};
+	CertStats cstats; cstats.clear();
 	struct Extractor {
+		CertStats* cs;
 		const vector<pt3>* gp; glpt_edge_cache* idc; face_crossing_cache* fc;
 		long* n_cells; int *ok, *bad, *ntouch, *nbad_t, *npoly, *nclip;
 		bool alpha_mode; double cutoff;
@@ -800,6 +833,18 @@ int main(int argc, char* argv[]) {
 			cell_points_and_ids(c, *gp, *idc, pts, ids);
 			cell_extraction_result res;
 			extract_cell(pts, ids, *fc, res);
+			if(g_certify) {
+				double mg; cert_result cr=certify_cell(pts, g_certify_level, mg);
+				if(!res.any_edge) ++cs->noarc[cr];
+				else {
+					int okx=res.decompose_ok?1:0; ++cs->arc[okx][cr]; cs->margin[okx].push_back(mg);
+					{ // chart consistency: faces whose best chart differs from the cell's
+						int cc=pick_chart5(pts), fdiff=0;
+						for(int f=0;f<10;++f) { pt3 fp[3]; for(int k=0;k<3;++k) fp[k]=pts[GLPT_CELL_FACES[f][k]]; if(pick_chart(fp)!=cc) ++fdiff; }
+						++cs->chartmix[okx][fdiff>0?1:0];
+					}
+				}
+			}
 			if(!res.any_edge) return; // curve doesn't cross this cell at all -- not a failure, nothing to count
 			*ntouch += res.ntouching_tets;
 			*nbad_t += res.nbad_tets;
@@ -839,6 +884,7 @@ int main(int argc, char* argv[]) {
 	};
 	vector<glpt> bad_list;
 	Extractor ext;
+	ext.cs=&cstats;
 	ext.gp=&gp; ext.idc=&id_cache; ext.fc=&fcache; ext.n_cells=&n_cells_visited;
 	ext.ok=&ok_cells; ext.bad=&bad_cells; ext.ntouch=&ntouching_tets; ext.nbad_t=&nbad_tets; ext.npoly=npoly_out;
 	ext.nclip=&nclipped; ext.alpha_mode=alpha_mode; ext.cutoff=cutoff;
@@ -878,6 +924,7 @@ int main(int argc, char* argv[]) {
 		if(nrepaired==0) break; // every bad cell already maxed out -- no point re-extracting
 
 		n_cells_visited=0; ok_cells=0; bad_cells=0; ntouching_tets=0; nbad_tets=0; nclipped=0;
+		cstats.clear();
 		for(int sz=0;sz<8;++sz) npoly_out[sz]=0;
 		vert_pts.clear(); vert_index.clear(); faces_out.clear();
 		flat_verts.clear(); flat_faces.clear();
@@ -893,6 +940,29 @@ int main(int argc, char* argv[]) {
 	for(int sz=3;sz<8;++sz) if(npoly_out[sz]) cout<<" "<<sz<<"-gon="<<npoly_out[sz];
 	cout<<endl;
 	cout<<"touching tetrahedra: "<<ntouching_tets<<"  unhandled node count: "<<nbad_tets<<endl;
+	if(g_certify) {
+		const char* nm[3]={"EMPTY","GRAPH","UNDECIDED"};
+		cout<<endl<<"--- certify (level "<<g_certify_level<<") ---"<<endl;
+		cout<<"leaves without an arc:";
+		for(int b=0;b<3;++b) cout<<" "<<nm[b]<<"="<<cstats.noarc[b];
+		cout<<endl;
+		for(int mix=0;mix<2;++mix) {
+			long g=cstats.chartmix[1][mix], bd=cstats.chartmix[0][mix];
+			cout<<"cells with arc, "<<(mix?"some face in another chart":"all faces in cell chart")<<": good="<<g<<" bad="<<bd
+				<<" bad rate="<<(g+bd?100.0*bd/(g+bd):0.0)<<"%"<<endl;
+		}
+		for(int okx=1;okx>=0;--okx) {
+			long tot=0; for(int b=0;b<3;++b) tot+=cstats.arc[okx][b];
+			cout<<(okx?"good":"bad ")<<" cells (with arc), "<<tot<<":";
+			for(int b=0;b<3;++b) cout<<" "<<nm[b]<<"="<<cstats.arc[okx][b]<<" ("<<(tot?100.0*cstats.arc[okx][b]/tot:0.0)<<"%)";
+			cout<<endl;
+			vector<double>& m=cstats.margin[okx];
+			if(!m.empty()) {
+				sort(m.begin(),m.end());
+				cout<<"   GRAPH margin (gap-pi, rad): p10="<<m[m.size()/10]<<" median="<<m[m.size()/2]<<" p90="<<m[(9*m.size())/10]<<endl;
+			}
+		}
+	}
 	if(!alpha_mode && cutoff<1e299) cout<<"polygons dropped by --cutoff: "<<nclipped<<endl;
 	if(g_bernstein) cout<<"Bernstein fallback seeds used: "<<g_bfallback_tried<<" faces tried, "
 		<<g_bfallback_new_root<<" found a root the fixed/dynamic seeds missed"<<endl;
