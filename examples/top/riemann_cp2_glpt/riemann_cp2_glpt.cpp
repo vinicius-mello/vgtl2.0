@@ -69,6 +69,7 @@
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <chrono>
 #include "glpt_extraction.hpp"
 #include "glpt_bernstein.hpp"
 #include "glpt_certify.hpp"
@@ -476,6 +477,15 @@ void genus_check(const std::vector<std::vector<int> >& faces_in, int nverts, int
 // The result is verified by genus_check() (closed, connected, chi=2-2g).
 bool g_close=false;
 bool g_cause_stats=false;
+bool g_global_scan=false; // continuation from all 108 roots instead of the first touched one
+bool g_timing=false;      // phase timings + peak RSS
+bool g_leaf_hash=false;   // order-independent hash of the final leaf set
+inline double now_s() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
+inline long peak_rss_kb() { // VmHWM from /proc/self/status (Linux)
+	std::ifstream f("/proc/self/status"); std::string line;
+	while(std::getline(f,line)) if(line.rfind("VmHWM:",0)==0) return std::atol(line.c_str()+6);
+	return -1;
+}
 static pt3 newton_onto_curve(pt3 p, bool& ok) {
 	int k=0; for(int i=1;i<3;++i) if(std::abs(p[i])>std::abs(p[k])) k=i;
 	int i1=(k+1)%3, i2=(k+2)%3; if(i1>i2) std::swap(i1,i2);
@@ -601,6 +611,9 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--geodesic-faces") { g_geodesic_faces=true; } // the default; accepted for old command lines
 		else if(arg=="--chart-flat-faces") { g_geodesic_faces=false; }
 		else if(arg=="--cause-stats") { g_cause_stats=true; }
+		else if(arg=="--global-scan") { g_global_scan=true; }
+		else if(arg=="--timing") { g_timing=true; }
+		else if(arg=="--leaf-hash") { g_leaf_hash=true; }
 		else if(arg=="--certify-level" && i+1<argc) { g_certify=true; g_certify_level=atoi(argv[++i]); }
 		else if(arg=="--certify-selftest") { g_certify=true; certify_selftest_flag=true; }
 		else if(arg=="--repair-rounds" && i+1<argc) { repair_rounds=atoi(argv[++i]); }
@@ -612,7 +625,7 @@ int main(int argc, char* argv[]) {
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
 				<<"[--flat] [--alpha-projection] [--cutoff X] [--chart N] [--flat-swap] [--genus-check] [--close] [--generic] [--generic-seed N] [--proximity] "
-				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--certify] [--certify-level N] [--certify-selftest] [--geodesic-faces | --chart-flat-faces] [--cause-stats] "
+				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--certify] [--certify-level N] [--certify-selftest] [--geodesic-faces | --chart-flat-faces] [--cause-stats] [--global-scan] [--timing] [--leaf-hash] "
 				<<"[--repair-rounds N] [--repair-extra-depth N] "
 				<<"[--tangency-threshold X] [--tangency-extra-depth N] [--legacy-priority-refine] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
@@ -691,6 +704,7 @@ int main(int argc, char* argv[]) {
 	// priority queue (cell_priority/cell_priority_bernstein, modulated
 	// by --proximity), kept only for comparison -- see this file's own
 	// git history and [[riemann_pc2_gradient_dispersion]].
+	double t_refine0=now_s();
 	cout<<endl<<"--- adaptive refinement ---"<<endl;
 	face_crossing_cache fcache;
 	int nsubdivisions=0;
@@ -730,7 +744,8 @@ int main(int argc, char* argv[]) {
 		int seed_root=-1;
 		long n_cells_tested=0;
 		long n_tangency_refined=0;
-		for(int s=0;s<GLPT_NCELLS;++s) {
+		if(g_global_scan) seed_root=0; // every root is pushed below
+		else for(int s=0;s<GLPT_NCELLS;++s) {
 			pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
 			cell_points_and_ids(glpt(s), gp, id_cache, pts, ids);
 			cell_extraction_result res;
@@ -741,9 +756,11 @@ int main(int argc, char* argv[]) {
 		if(seed_root<0) {
 			cout<<"curve doesn't touch any of the 108 root cells -- nothing to mesh"<<endl;
 		} else {
-			cout<<"seed root: "<<seed_root<<" (scanned "<<(seed_root+1)<<"/108)"<<endl;
+			if(g_global_scan) cout<<"global scan: continuation from all "<<GLPT_NCELLS<<" roots"<<endl;
+			else cout<<"seed root: "<<seed_root<<" (scanned "<<(seed_root+1)<<"/108)"<<endl;
 			set<glpt> visited;
 			vector<glpt> frontier(1, glpt(seed_root));
+			if(g_global_scan) { frontier.clear(); for(int r=GLPT_NCELLS-1;r>=0;--r) frontier.push_back(glpt(r)); }
 			while(!frontier.empty()) {
 				glpt c = frontier.back(); frontier.pop_back();
 				if(!tree.exists(c)) continue;      // superseded by an earlier cascade
@@ -813,6 +830,7 @@ int main(int argc, char* argv[]) {
 	//   independent vertices per polygon, exactly like riemann_cp2.cpp's
 	//   own OBJ output does (verified there directly: every output edge
 	//   at multiplicity 1, no global dedup at all).
+	double t_extract0=now_s();
 	cout<<endl<<"--- surface extraction ---"<<endl;
 	int npoly_out[8]={0,0,0,0,0,0,0,0};
 	int ntouching_tets=0, nbad_tets=0, ok_cells=0, bad_cells=0, nclipped=0;
@@ -1037,6 +1055,18 @@ int main(int argc, char* argv[]) {
 				}
 			}
 		}
+	}
+	if(g_leaf_hash) {
+		struct H { uint64_t* h; long* n; void operator()(const glpt& c) const {
+			uint64_t z=c.raw()+0x9e3779b97f4a7c15ULL; z=(z^(z>>30))*0xbf58476d1ce4e5b9ULL; z=(z^(z>>27))*0x94d049bb133111ebULL; z^=z>>31;
+			*h+=z; ++*n; } };
+		uint64_t h=0; long n=0; H f; f.h=&h; f.n=&n; tree.for_each_leaf(f);
+		cout<<"leaf set: "<<n<<" leaves, hash "<<std::hex<<h<<std::dec<<endl;
+	}
+	if(g_timing) {
+		double t_end=now_s();
+		cout<<"timing: refinement "<<(t_extract0-t_refine0)<<" s, extraction (incl. repair) + post-processing "
+			<<(t_end-t_extract0)<<" s, peak RSS "<<peak_rss_kb()/1024.0<<" MB"<<endl;
 	}
 	// --- Phase 3: output (OBJ mesh) --
 	ofstream out(obj_path.c_str());
