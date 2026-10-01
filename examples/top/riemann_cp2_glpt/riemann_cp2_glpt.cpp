@@ -69,6 +69,7 @@
 #include <fstream>
 #include <iostream>
 #include <random>
+#include <array>
 #include <chrono>
 #include "glpt_extraction.hpp"
 #include "glpt_bernstein.hpp"
@@ -480,6 +481,63 @@ bool g_cause_stats=false;
 bool g_global_scan=false; // continuation from all 108 roots instead of the first touched one
 bool g_timing=false;      // phase timings + peak RSS
 bool g_leaf_hash=false;   // order-independent hash of the final leaf set
+bool g_neighbor_test=false; // every leaf's facet neighbours must carry the facet's 4 vertices, at the same points
+// --box R: the affine-chart baseline. The seed is Kuhn's triangulation of
+// the cube [-R,R]^4 in the coordinates (Re x, Im x, Re y, Im y) of the
+// chart Z=1: 16 corners (id = bitmask of the coordinates at +R) and 24
+// cells, one per permutation, each ordered by the number of coordinates
+// at +R -- a balanced, colour-ordered seed with boundary. New vertices
+// are affine midpoints in the chart and every face is flat in it, so
+// everything is consistent within the one chart.
+double g_box_R = 0;
+// F'(p) = F(M p): the curve seen from a seed whose points were NOT moved
+// by M. --generic moves the Gaifullin seed by M; with --box the seed is
+// kept axis-aligned in its chart and the curve is moved instead, which
+// gives the same relative position of curve and mesh (and keeps the
+// curve from meeting the box grid in non-generic ways: with real
+// coefficients its real locus would lie in a union of mesh faces).
+inline poly_F3 compose_linear(const poly_F3& F, const cx M[3][3]) {
+	typedef std::map<std::array<int,3>,cx> P3;
+	auto mul=[](const P3& A, const P3& B){ P3 R; for(auto& a: A) for(auto& b: B) { std::array<int,3> e{{a.first[0]+b.first[0],a.first[1]+b.first[1],a.first[2]+b.first[2]}}; R[e]+=a.second*b.second; } return R; };
+	P3 L[3];
+	for(int i=0;i<3;++i) for(int j=0;j<3;++j) { std::array<int,3> e{{0,0,0}}; e[j]=1; L[i][e]=M[i][j]; }
+	P3 out;
+	for(const term3& t: F.t) {
+		P3 m; m[std::array<int,3>{{0,0,0}}]=t.c;
+		for(int i=0;i<3;++i) for(int k=0;k<t.e[i];++k) m=mul(m,L[i]);
+		for(auto& kv: m) out[kv.first]+=kv.second;
+	}
+	poly_F3 G; G.d=F.d;
+	for(auto& kv: out) if(std::abs(kv.second)>1e-15) { term3 t; t.e[0]=kv.first[0]; t.e[1]=kv.first[1]; t.e[2]=kv.first[2]; t.c=kv.second; G.t.push_back(t); }
+	return G;
+}
+static int g_box_cells[24][5];
+inline void make_box_seed(double R, vector<pt3>& gp) {
+	gp.assign(16, pt3());
+	for(int m=0;m<16;++m) {
+		double x[4]; for(int k=0;k<4;++k) x[k] = (m>>k & 1) ? R : -R;
+		pt3 p; p[0]=cx(x[0],x[1]); p[1]=cx(x[2],x[3]); p[2]=cx(1,0);
+		gp[m]=normalize3(p);
+	}
+	int perm[4]={0,1,2,3}, c=0;
+	do {
+		int v=0; g_box_cells[c][0]=0;
+		for(int k=0;k<4;++k) { v|=1<<perm[k]; g_box_cells[c][k+1]=v; }
+		++c;
+	} while(std::next_permutation(perm,perm+4));
+	glpt_set_seed(g_box_cells, 24, 16, true);
+	g_affine_midpoint_chart = 2;
+	g_forced_face_chart = 2;
+	g_geodesic_faces = false;
+}
+// --fs-diam h: refine every cell that meets C until its Fubini-Study
+// diameter is below h (instead of, or on top of, a fixed --depth);
+// gives the intrinsic and the affine-chart meshes the same resolution.
+double g_fs_diam = 0;
+inline double cell_fs_diam(const pt3 pts[glpt::DIM+1]) {
+	double d=0; for(int a=0;a<=glpt::DIM;++a) for(int b=a+1;b<=glpt::DIM;++b) d=std::max(d,fs_dist(pts[a],pts[b]));
+	return d;
+}
 inline double now_s() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 inline long peak_rss_kb() { // VmHWM from /proc/self/status (Linux)
 	std::ifstream f("/proc/self/status"); std::string line;
@@ -612,6 +670,9 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--chart-flat-faces") { g_geodesic_faces=false; }
 		else if(arg=="--cause-stats") { g_cause_stats=true; }
 		else if(arg=="--global-scan") { g_global_scan=true; }
+		else if(arg=="--box" && i+1<argc) { g_box_R=atof(argv[++i]); }
+		else if(arg=="--neighbor-test") { g_neighbor_test=true; }
+		else if(arg=="--fs-diam" && i+1<argc) { g_fs_diam=atof(argv[++i]); }
 		else if(arg=="--timing") { g_timing=true; }
 		else if(arg=="--leaf-hash") { g_leaf_hash=true; }
 		else if(arg=="--certify-level" && i+1<argc) { g_certify=true; g_certify_level=atoi(argv[++i]); }
@@ -625,7 +686,7 @@ int main(int argc, char* argv[]) {
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
 				<<"[--flat] [--alpha-projection] [--cutoff X] [--chart N] [--flat-swap] [--genus-check] [--close] [--generic] [--generic-seed N] [--proximity] "
-				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--certify] [--certify-level N] [--certify-selftest] [--geodesic-faces | --chart-flat-faces] [--cause-stats] [--global-scan] [--timing] [--leaf-hash] "
+				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--certify] [--certify-level N] [--certify-selftest] [--geodesic-faces | --chart-flat-faces] [--cause-stats] [--global-scan] [--timing] [--leaf-hash] [--box R] [--fs-diam h] [--neighbor-test] "
 				<<"[--repair-rounds N] [--repair-extra-depth N] "
 				<<"[--tangency-threshold X] [--tangency-extra-depth N] [--legacy-priority-refine] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
@@ -660,17 +721,26 @@ int main(int argc, char* argv[]) {
 	if(generic) cout<<" (seed="<<generic_seed<<")";
 	cout<<"  proximity="<<(g_proximity?"on":"off");
 	cout<<"  bernstein="<<(g_bernstein?"on":"off");
-	cout<<"  faces="<<(g_geodesic_faces?"geodesic":"chart-flat");
+	cout<<"  faces="<<(g_box_R>0 ? "chart-flat (box)" : (g_geodesic_faces?"geodesic":"chart-flat"));
 	if(g_bernstein) cout<<" (level="<<g_bernstein_level<<")";
 	cout<<endl;
 
 	bernstein_bounds_cache bcache;
 	if(g_bernstein) enable_bernstein(bcache);
 
+	if(g_box_R>0 && (g_bernstein || g_close)) {
+		cerr<<"--box is incompatible with --bernstein and --close"<<endl;
+		return 1;
+	}
 	vector<pt3> gp = gaifullin_points();
+	if(g_box_R>0) {
+		make_box_seed(g_box_R, gp);
+		cout<<"seed: Kuhn box [-"<<g_box_R<<","<<g_box_R<<"]^4 in the chart Z=1 (affine midpoints, chart-flat faces)"<<endl;
+	}
 	if(generic) {
 		cx M[3][3]; random_unitary(M,generic_seed);
-		for(size_t i=0;i<gp.size();++i) gp[i]=apply_unitary(M,gp[i]);
+		if(g_box_R>0) set_curve(compose_linear(cat[function_idx].F, M)); // see compose_linear()
+		else for(size_t i=0;i<gp.size();++i) gp[i]=apply_unitary(M,gp[i]);
 	}
 	glpt_edge_cache id_cache;
 	glpt_tree tree;
@@ -711,7 +781,7 @@ int main(int argc, char* argv[]) {
 	if(legacy_priority_refine) {
 		priority_queue<pair<double,glpt> > pq;
 		int ndropped=0;
-		for(int s=0;s<GLPT_NCELLS;++s) {
+		for(int s=0;s<glpt_seed_count();++s) {
 			pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
 			glpt c(s);
 			cell_points_and_ids(c, gp, id_cache, pts, ids);
@@ -745,7 +815,7 @@ int main(int argc, char* argv[]) {
 		long n_cells_tested=0;
 		long n_tangency_refined=0;
 		if(g_global_scan) seed_root=0; // every root is pushed below
-		else for(int s=0;s<GLPT_NCELLS;++s) {
+		else for(int s=0;s<glpt_seed_count();++s) {
 			pt3 pts[glpt::DIM+1]; int ids[glpt::DIM+1];
 			cell_points_and_ids(glpt(s), gp, id_cache, pts, ids);
 			cell_extraction_result res;
@@ -754,13 +824,13 @@ int main(int argc, char* argv[]) {
 			if(res.any_edge) { seed_root=s; break; }
 		}
 		if(seed_root<0) {
-			cout<<"curve doesn't touch any of the 108 root cells -- nothing to mesh"<<endl;
+			cout<<"curve doesn't touch any root cell -- nothing to mesh"<<endl;
 		} else {
-			if(g_global_scan) cout<<"global scan: continuation from all "<<GLPT_NCELLS<<" roots"<<endl;
-			else cout<<"seed root: "<<seed_root<<" (scanned "<<(seed_root+1)<<"/108)"<<endl;
+			if(g_global_scan) cout<<"global scan: continuation from all "<<glpt_seed_count()<<" roots"<<endl;
+			else cout<<"seed root: "<<seed_root<<" (scanned "<<(seed_root+1)<<"/"<<glpt_seed_count()<<")"<<endl;
 			set<glpt> visited;
 			vector<glpt> frontier(1, glpt(seed_root));
-			if(g_global_scan) { frontier.clear(); for(int r=GLPT_NCELLS-1;r>=0;--r) frontier.push_back(glpt(r)); }
+			if(g_global_scan) { frontier.clear(); for(int r=glpt_seed_count()-1;r>=0;--r) frontier.push_back(glpt(r)); }
 			while(!frontier.empty()) {
 				glpt c = frontier.back(); frontier.pop_back();
 				if(!tree.exists(c)) continue;      // superseded by an earlier cascade
@@ -784,7 +854,8 @@ int main(int argc, char* argv[]) {
 					&& res.min_transversality<tangency_threshold
 					&& c.simplex_level()<max_depth+tangency_extra_depth;
 				if(needs_tangency_refine && c.simplex_level()>=max_depth) ++n_tangency_refined;
-				if(c.simplex_level()<max_depth || needs_tangency_refine) {
+				bool needs_fs_refine = g_fs_diam>0 && c.simplex_level()<40 && cell_fs_diam(pts)>g_fs_diam;
+				if(c.simplex_level()<max_depth || needs_tangency_refine || needs_fs_refine) {
 					tree.clear_recent();
 					tree.compat_bisect(c);
 					++nsubdivisions;
@@ -803,8 +874,8 @@ int main(int argc, char* argv[]) {
 		if(tangency_threshold>0.0) cout<<"cells past --depth forced deeper by --tangency-threshold: "<<n_tangency_refined<<endl;
 	}
 	cout<<"final leaf count: "<<tree.leaf_count()<<endl;
-	cout<<"distinct vertices minted: "<<id_cache.next_id()<<" ("<<GLPT_BASE_VERTEX_COUNT<<" base + "
-		<<(id_cache.next_id()-GLPT_BASE_VERTEX_COUNT)<<" from bisection)"<<endl;
+	cout<<"distinct vertices minted: "<<id_cache.next_id()<<" ("<<glpt_seed_vertex_count()<<" base + "
+		<<(id_cache.next_id()-glpt_seed_vertex_count())<<" from bisection)"<<endl;
 
 	// --- Phase 2: extraction -- actual connected polygons, not just
 	// points (glpt_extraction.hpp's extract_cell(), one call per final
@@ -830,6 +901,25 @@ int main(int argc, char* argv[]) {
 	//   independent vertices per polygon, exactly like riemann_cp2.cpp's
 	//   own OBJ output does (verified there directly: every output edge
 	//   at multiplicity 1, no global dedup at all).
+	if(g_neighbor_test) { // facet-neighbour consistency of the final mesh
+		struct T { glpt_tree* tr; const vector<pt3>* gp; glpt_edge_cache* ic; long *nq,*nbad,*nposbad,*nbnd;
+			void operator()(const glpt& c) const {
+				pt3 P[5]; int I[5]; cell_points_and_ids(c,*gp,*ic,P,I);
+				for(int i=0;i<5;++i) {
+					glpt nb; glpt_tree::neighbor_status st=tr->neighbor_leaf(c,i,nb);
+					if(st!=glpt_tree::FOUND) { if(st==glpt_tree::UNRESOLVED) ++*nbnd; continue; }
+					++*nq;
+					pt3 Q[5]; int J[5]; cell_points_and_ids(nb,*gp,*ic,Q,J);
+					if(nb.simplex_level()!=c.simplex_level()) continue; // coarser neighbour: facet not shared exactly
+					for(int k=0;k<5;++k) { if(k==i) continue; int m=-1; for(int l=0;l<5;++l) if(J[l]==I[k]) m=l;
+						if(m<0) { ++*nbad; break; }
+						if(fs_dist(P[k],Q[m])>1e-6) { ++*nposbad; break; } }
+				}
+			} };
+		long nq=0,nbad=0,nposbad=0,nbnd=0; T t; t.tr=&tree; t.gp=&gp; t.ic=&id_cache; t.nq=&nq; t.nbad=&nbad; t.nposbad=&nposbad; t.nbnd=&nbnd;
+		tree.for_each_leaf(t);
+		cout<<"neighbor test: "<<nq<<" neighbour queries, "<<nbad<<" with a facet vertex missing, "<<nposbad<<" with a position mismatch, "<<nbnd<<" unresolved (boundary)"<<endl;
+	}
 	double t_extract0=now_s();
 	cout<<endl<<"--- surface extraction ---"<<endl;
 	int npoly_out[8]={0,0,0,0,0,0,0,0};
@@ -859,7 +949,8 @@ int main(int argc, char* argv[]) {
 	// good vs bad cells.
 	struct CauseStats {
 		long reason[4]; std::vector<double> tv[2]; // tv[extraction ok?]
-		void clear() { for(int i=0;i<4;++i) reason[i]=0; tv[0].clear(); tv[1].clear(); }
+		std::vector<double> diam; // FS diameter of every cell with an arc
+		void clear() { for(int i=0;i<4;++i) reason[i]=0; tv[0].clear(); tv[1].clear(); diam.clear(); }
 	};
 	CauseStats causes; causes.clear();
 	struct Extractor {
@@ -900,7 +991,7 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			if(!res.any_edge) return; // curve doesn't cross this cell at all -- not a failure, nothing to count
-			if(g_cause_stats) { ++cz->reason[res.fail_reason]; cz->tv[res.decompose_ok?1:0].push_back(res.min_transversality); }
+			if(g_cause_stats) { ++cz->reason[res.fail_reason]; cz->tv[res.decompose_ok?1:0].push_back(res.min_transversality); cz->diam.push_back(cell_fs_diam(pts)); }
 			*ntouch += res.ntouching_tets;
 			*nbad_t += res.nbad_tets;
 			if(!res.decompose_ok) { ++(*bad); if(bad_list) bad_list->push_back(c); return; }
@@ -997,6 +1088,10 @@ int main(int argc, char* argv[]) {
 	cout<<"touching tetrahedra: "<<ntouching_tets<<"  unhandled node count: "<<nbad_tets<<endl;
 	if(g_cause_stats) {
 		cout<<endl<<"--- cause stats ---"<<endl;
+		if(!causes.diam.empty()) {
+			vector<double>& d=causes.diam; sort(d.begin(),d.end());
+			cout<<"FS diameter of cells meeting C: median="<<d[d.size()/2]<<" p90="<<d[(9*d.size())/10]<<" max="<<d.back()<<endl;
+		}
 		cout<<"bad cells: irregular facet="<<causes.reason[1]<<" node degree="<<causes.reason[2]<<" bad cycle="<<causes.reason[3]<<endl;
 		for(int okx=1;okx>=0;--okx) {
 			vector<double>& m=causes.tv[okx];

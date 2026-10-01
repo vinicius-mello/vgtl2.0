@@ -86,7 +86,9 @@ inline pt3 rehomogenize(int chart, cx a, cx b) {
 
 //! Best-conditioned chart for 3 given points: max over charts of the
 //! min |coordinate| across the 3 vertices.
+int g_forced_face_chart = -1; // >=0: every face in this chart (the affine-chart baseline, --box)
 inline int pick_chart(const pt3 p[3]) {
+	if(g_forced_face_chart>=0) return g_forced_face_chart;
 	int chart=0; double bestscore=-1;
 	for(int c=0;c<3;++c) {
 		double m=std::min(std::abs(p[0][c]), std::min(std::abs(p[1][c]),std::abs(p[2][c])));

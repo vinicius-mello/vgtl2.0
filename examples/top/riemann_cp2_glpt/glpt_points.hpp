@@ -135,7 +135,19 @@ inline std::vector<pt3> gaifullin_points() {
 //! Root cell's vertex points: direct lookup via glpt_gaifullin_cells,
 //! into the SAME gaifullin_points() every riemann_cp2.cpp curve uses.
 inline void glpt_root_vertex_points(int seed, const std::vector<pt3>& gp, pt3 points[glpt::DIM+1]) {
-	for(int k=0;k<=glpt::DIM;++k) points[k] = gp[glpt_gaifullin_cells[seed][k]];
+	for(int k=0;k<=glpt::DIM;++k) points[k] = gp[glpt_seed_cells[seed][k]];
+}
+
+//! New-vertex rule. By default the Fubini-Study geodesic midpoint; if
+//! g_affine_midpoint_chart is 0, 1 or 2, the affine midpoint in that
+//! chart instead (the affine-chart baseline, --box), returned as a unit
+//! representative of the same projective point.
+int g_affine_midpoint_chart = -1;
+inline pt3 glpt_midpoint(const pt3& a, const pt3& b) {
+	if(g_affine_midpoint_chart<0) return fs_midpoint(a,b);
+	const int k=g_affine_midpoint_chart;
+	pt3 m; for(int i=0;i<3;++i) m[i]=0.5*(a[i]/a[k]+b[i]/b[k]);
+	return normalize3(m);
 }
 
 //! Child (zo=0 or 1) vertex points, given the PARENT's (already-known)
@@ -168,7 +180,7 @@ inline void glpt_child_vertex_points(const glpt& parent, const pt3 parent_points
 			child_points[k] = parent_points[match_j];
 		} else {
 			++n_unmatched;
-			child_points[k] = fs_midpoint(parent_points[parent.level()], parent_points[DIM]);
+			child_points[k] = glpt_midpoint(parent_points[parent.level()], parent_points[DIM]);
 		}
 	}
 	assert(n_unmatched==1 && "glpt_child_vertex_points: expected exactly one new vertex per bisection");
