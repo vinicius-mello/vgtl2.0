@@ -386,6 +386,32 @@ void cell_points_and_ids(const glpt& c, const vector<pt3>& gp, glpt_edge_cache& 
 // components and b boundary loops.
 bool g_genus_check=false;
 static int dsu_find(std::vector<int>& p, int x) { while(p[x]!=x) { p[x]=p[p[x]]; x=p[x]; } return x; }
+// Fubini-Study area of the extracted complex (each polygon fanned into
+// triangles, each triangle measured in the horizontal tangent space at
+// its first vertex; second-order accurate) against Wirtinger's theorem:
+// with d(p,q)=arccos|<p,q>| a projective line is a sphere of radius 1/2,
+// so a smooth curve of degree n has area n*pi. Also |F| at the vertices
+// (unit representatives).
+void surface_stats(const std::vector<pt3>& P, const std::vector<std::vector<int> >& faces, int degree) {
+	double area=0;
+	for(const std::vector<int>& f: faces) {
+		const pt3& a=P[f[0]];
+		for(size_t i=1;i+1<f.size();++i) {
+			pt3 b=align_phase(a,P[f[i]]), c=align_phase(a,P[f[i+1]]), e1, e2;
+			for(int k=0;k<3;++k) { e1[k]=b[k]-a[k]; e2[k]=c[k]-a[k]; }
+			cx p1=hdot(e1,a), p2=hdot(e2,a);
+			for(int k=0;k<3;++k) { e1[k]-=p1*a[k]; e2[k]-=p2*a[k]; }
+			double n1=hdot(e1,e1).real(), n2=hdot(e2,e2).real(), r=hdot(e1,e2).real();
+			area+=0.5*std::sqrt(std::max(0.0,n1*n2-r*r));
+		}
+	}
+	std::vector<double> res;
+	for(const pt3& p: P) { pt3 u=normalize3(p); res.push_back(std::abs(eval_poly3(g_F,u[0],u[1],u[2]))); }
+	std::sort(res.begin(),res.end());
+	std::cout<<"FS area = "<<area<<"  (Wirtinger n*pi = "<<degree*M_PI<<", ratio "<<area/(degree*M_PI)<<")"<<std::endl;
+	if(!res.empty())
+		std::cout<<"|F| at "<<res.size()<<" vertices: median="<<res[res.size()/2]<<" p99="<<res[(99*res.size())/100]<<" max="<<res.back()<<std::endl;
+}
 void genus_check(const std::vector<std::vector<int> >& faces_in, int nverts, int expected_genus) {
 	// corners grouped by link component of their vertex
 	std::vector<std::vector<std::pair<int,int> > > corners(nverts); // (face, pos)
@@ -449,6 +475,7 @@ void genus_check(const std::vector<std::vector<int> >& faces_in, int nverts, int
 // moved onto the curve by Newton's method in the best affine chart.
 // The result is verified by genus_check() (closed, connected, chi=2-2g).
 bool g_close=false;
+bool g_cause_stats=false;
 static pt3 newton_onto_curve(pt3 p, bool& ok) {
 	int k=0; for(int i=1;i<3;++i) if(std::abs(p[i])>std::abs(p[k])) k=i;
 	int i1=(k+1)%3, i2=(k+2)%3; if(i1>i2) std::swap(i1,i2);
@@ -573,6 +600,7 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--certify") { g_certify=true; }
 		else if(arg=="--geodesic-faces") { g_geodesic_faces=true; } // the default; accepted for old command lines
 		else if(arg=="--chart-flat-faces") { g_geodesic_faces=false; }
+		else if(arg=="--cause-stats") { g_cause_stats=true; }
 		else if(arg=="--certify-level" && i+1<argc) { g_certify=true; g_certify_level=atoi(argv[++i]); }
 		else if(arg=="--certify-selftest") { g_certify=true; certify_selftest_flag=true; }
 		else if(arg=="--repair-rounds" && i+1<argc) { repair_rounds=atoi(argv[++i]); }
@@ -584,7 +612,7 @@ int main(int argc, char* argv[]) {
 		else {
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--depth N] [--threshold X] [--obj PATH] "
 				<<"[--flat] [--alpha-projection] [--cutoff X] [--chart N] [--flat-swap] [--genus-check] [--close] [--generic] [--generic-seed N] [--proximity] "
-				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--certify] [--certify-level N] [--certify-selftest] [--geodesic-faces | --chart-flat-faces] "
+				<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--certify] [--certify-level N] [--certify-selftest] [--geodesic-faces | --chart-flat-faces] [--cause-stats] "
 				<<"[--repair-rounds N] [--repair-extra-depth N] "
 				<<"[--tangency-threshold X] [--tangency-extra-depth N] [--legacy-priority-refine] [--list]"<<endl;
 			if(arg!="--help" && arg!="-h") return 1;
@@ -809,7 +837,15 @@ int main(int argc, char* argv[]) {
 		void clear() { for(int a=0;a<2;++a) for(int b=0;b<3;++b) arc[a][b]=0; for(int b=0;b<3;++b) noarc[b]=0; for(int a=0;a<2;++a) for(int b=0;b<2;++b) chartmix[a][b]=0; margin[0].clear(); margin[1].clear(); }
 	};
 	CertStats cstats; cstats.clear();
+	// --cause-stats: why bad cells fail, and the transversality score of
+	// good vs bad cells.
+	struct CauseStats {
+		long reason[4]; std::vector<double> tv[2]; // tv[extraction ok?]
+		void clear() { for(int i=0;i<4;++i) reason[i]=0; tv[0].clear(); tv[1].clear(); }
+	};
+	CauseStats causes; causes.clear();
 	struct Extractor {
+		CauseStats* cz;
 		CertStats* cs;
 		const vector<pt3>* gp; glpt_edge_cache* idc; face_crossing_cache* fc;
 		long* n_cells; int *ok, *bad, *ntouch, *nbad_t, *npoly, *nclip;
@@ -846,6 +882,7 @@ int main(int argc, char* argv[]) {
 				}
 			}
 			if(!res.any_edge) return; // curve doesn't cross this cell at all -- not a failure, nothing to count
+			if(g_cause_stats) { ++cz->reason[res.fail_reason]; cz->tv[res.decompose_ok?1:0].push_back(res.min_transversality); }
 			*ntouch += res.ntouching_tets;
 			*nbad_t += res.nbad_tets;
 			if(!res.decompose_ok) { ++(*bad); if(bad_list) bad_list->push_back(c); return; }
@@ -884,7 +921,7 @@ int main(int argc, char* argv[]) {
 	};
 	vector<glpt> bad_list;
 	Extractor ext;
-	ext.cs=&cstats;
+	ext.cs=&cstats; ext.cz=&causes;
 	ext.gp=&gp; ext.idc=&id_cache; ext.fc=&fcache; ext.n_cells=&n_cells_visited;
 	ext.ok=&ok_cells; ext.bad=&bad_cells; ext.ntouch=&ntouching_tets; ext.nbad_t=&nbad_tets; ext.npoly=npoly_out;
 	ext.nclip=&nclipped; ext.alpha_mode=alpha_mode; ext.cutoff=cutoff;
@@ -924,7 +961,7 @@ int main(int argc, char* argv[]) {
 		if(nrepaired==0) break; // every bad cell already maxed out -- no point re-extracting
 
 		n_cells_visited=0; ok_cells=0; bad_cells=0; ntouching_tets=0; nbad_tets=0; nclipped=0;
-		cstats.clear();
+		cstats.clear(); causes.clear();
 		for(int sz=0;sz<8;++sz) npoly_out[sz]=0;
 		vert_pts.clear(); vert_index.clear(); faces_out.clear();
 		flat_verts.clear(); flat_faces.clear();
@@ -940,6 +977,18 @@ int main(int argc, char* argv[]) {
 	for(int sz=3;sz<8;++sz) if(npoly_out[sz]) cout<<" "<<sz<<"-gon="<<npoly_out[sz];
 	cout<<endl;
 	cout<<"touching tetrahedra: "<<ntouching_tets<<"  unhandled node count: "<<nbad_tets<<endl;
+	if(g_cause_stats) {
+		cout<<endl<<"--- cause stats ---"<<endl;
+		cout<<"bad cells: irregular facet="<<causes.reason[1]<<" node degree="<<causes.reason[2]<<" bad cycle="<<causes.reason[3]<<endl;
+		for(int okx=1;okx>=0;--okx) {
+			vector<double>& m=causes.tv[okx];
+			if(m.empty()) continue;
+			sort(m.begin(),m.end());
+			long low=0; for(double x: m) if(x<0.05) ++low;
+			cout<<(okx?"good":"bad ")<<" cells: transversality p10="<<m[m.size()/10]<<" median="<<m[m.size()/2]
+				<<" fraction<0.05="<<(double)low/m.size()<<endl;
+		}
+	}
 	if(g_certify) {
 		const char* nm[3]={"EMPTY","GRAPH","UNDECIDED"};
 		cout<<endl<<"--- certify (level "<<g_certify_level<<") ---"<<endl;
@@ -970,9 +1019,11 @@ int main(int argc, char* argv[]) {
 	if(g_genus_check) {
 		int deg=g_F.d;
 		genus_check(faces_out, (int)vert_pts.size(), (deg-1)*(deg-2)/2);
+		surface_stats(vert_pts, faces_out, deg);
 		if(g_close) {
 			close_surface(vert_pts, faces_out);
 			genus_check(faces_out, (int)vert_pts.size(), (deg-1)*(deg-2)/2);
+		surface_stats(vert_pts, faces_out, deg);
 			if(!alpha_mode) { // re-project the closed complex (per polygon, as in flat mode)
 				flat_verts.clear(); flat_faces.clear(); nclipped=0;
 				for(auto& f: faces_out) {

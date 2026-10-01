@@ -135,6 +135,7 @@ struct cell_extraction_result {
 	bool any_edge;     // false: the curve doesn't cross this cell at all -- not a failure, just nothing to extract
 	bool decompose_ok; // true only when any_edge and the graph cleanly decomposed into cycles
 	double min_transversality; // min crossing_transversality() over every root examined; 1.0 (safe default) if none
+	int fail_reason; // 0 ok/no arc, 1 irregular facet (3 or >4 crossings), 2 node degree != 2, 3 bad cycle
 };
 
 //! Builds the crossing-node graph for one glpt 4-cell (its 5 facets'
@@ -151,6 +152,7 @@ inline void extract_cell(const pt3 pts[glpt::DIM+1], const int ids[glpt::DIM+1],
 	out.cycles.clear();
 	out.ntouching_tets=0; out.nbad_tets=0;
 	out.min_transversality=1.0;
+	out.fail_reason=0;
 	std::vector<std::vector<int> > adj;
 	bool tet_unhandled=false;
 
@@ -212,7 +214,7 @@ inline void extract_cell(const pt3 pts[glpt::DIM+1], const int ids[glpt::DIM+1],
 		if(dg!=2) deg_ok=false;
 	}
 	out.decompose_ok = out.any_edge && deg_ok && !tet_unhandled;
-	if(!out.decompose_ok) return;
+	if(!out.decompose_ok) { if(out.any_edge) out.fail_reason = tet_unhandled ? 1 : 2; return; }
 
 	std::vector<bool> seen(out.nodes.size(),false);
 	for(size_t q=0;q<out.nodes.size();++q) {
@@ -221,13 +223,13 @@ inline void extract_cell(const pt3 pts[glpt::DIM+1], const int ids[glpt::DIM+1],
 		int start=(int)q, prev=start, cur=adj[start][0];
 		seen[q]=true; cyc.push_back(start);
 		while(cur!=start) {
-			if(seen[cur]) { out.decompose_ok=false; return; }
+			if(seen[cur]) { out.decompose_ok=false; out.fail_reason=3; return; }
 			seen[cur]=true; cyc.push_back(cur);
 			int nxt=(adj[cur][0]==prev) ? adj[cur][1] : adj[cur][0];
 			prev=cur; cur=nxt;
-			if(cyc.size()>(size_t)(DIM+1)) { out.decompose_ok=false; return; }
+			if(cyc.size()>(size_t)(DIM+1)) { out.decompose_ok=false; out.fail_reason=3; return; }
 		}
-		if(cyc.size()<3) { out.decompose_ok=false; return; }
+		if(cyc.size()<3) { out.decompose_ok=false; out.fail_reason=3; return; }
 		out.cycles.push_back(cyc);
 	}
 }
