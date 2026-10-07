@@ -1077,7 +1077,10 @@ int main(int argc, char* argv[]) {
 		bad_list.clear();
 		tree.for_each_leaf(ext);
 	}
-	if(repair_rounds>0) cout<<"after repair: bad cells remaining: "<<bad_cells<<endl;
+	if(repair_rounds>0) {
+		cout<<"after repair: bad cells remaining: "<<bad_cells<<endl;
+		cout<<"final leaf count: "<<tree.leaf_count()<<" (after repair rounds)"<<endl;
+	}
 
 	cout<<"cells visited: "<<n_cells_visited<<", distinct faces solved: "<<fcache.size()<<endl;
 	if(g_bernstein) cout<<"faces Bernstein-pruned (Newton skipped, certified no root): "<<g_bernstein_pruned_faces<<endl;

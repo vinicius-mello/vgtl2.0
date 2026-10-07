@@ -106,7 +106,8 @@ Existing methods each treat some part of $C$ specially.
   $\CP^1\times\CP^1$ instead of $\CP^2$ can create singularities that the
   curve does not have: the closure of $w^2=z^3-z$ has a cusp at
   $(\infty,\infty)$ in $\CP^1\times\CP^1$, while its closure
-  $X^2Z=Y^3-YZ^2$ in $\CP^2$ is smooth (\Cref{sec:exp-s2s2}).
+  $X^2Z=Y^3-YZ^2$ in $\CP^2$ is smooth. On the same code, extraction
+  failures concentrate at that cusp (\Cref{sec:exp-s2s2}).
 \end{itemize}
 In $\CP^2$ the smooth curve is a smooth compact submanifold, with no
 distinguished points. A method that works intrinsically in $\CP^2$ needs
@@ -157,6 +158,12 @@ We triangulate $\CP^2$ itself and refine it adaptively around $C$.
   misses neighbourhoods of the points at infinity, its missing area
   decreasing only like $1/R^2$ with its half-width $R$, and at $R=16$ it
   already uses more cells than the whole of $\CP^2$.
+\item A comparison with $\CP^1\times\CP^1$ on the same code base, whose
+  balanced seed is the product of two octahedra. Where this
+  compactification gives the curve a cusp, extraction failures concentrate
+  at it, and some polygons cut across it with the wrong orientation. A
+  test with the Kähler form, $|\omega|/\mathrm{area}$ per polygon, detects
+  them, after which the closed surface has the right topology.
 \end{enumerate}
 
 % =====================================================================
@@ -902,21 +909,20 @@ depth & faces & refinement & leaves & good cells & bad cells & bad rate \\
 \midrule
 14 & chart-flat & base & 327\,370 & 27\,397 & 887 & $3.136\%$ \\
 14 & geodesic cones & base & 326\,260 & 28\,278 & 34 & $0.120\%$ \\
-14 & geodesic cones & + repair rounds (2) & 326\,260 & 28\,568 & 13 & $0.045\%$ \\
+14 & geodesic cones & + repair rounds (2) & 330\,616 & 28\,568 & 13 & $0.045\%$ \\
 14 & geodesic cones & + tangency threshold $0.05$ & 505\,654 & 37\,490 & 7 & $0.019\%$ \\
 14 & geodesic cones & + both & 505\,654 & 37\,490 & 7 & $0.019\%$ \\
 \midrule
 20 & chart-flat & base & 4\,620\,102 & 222\,981 & 1\,348 & $0.601\%$ \\
 20 & geodesic cones & base & 4\,618\,522 & 224\,425 & 14 & $0.006\%$ \\
-20 & geodesic cones & + repair rounds (2) & 4\,618\,522 & 224\,508 & 8 & $0.004\%$ \\
+20 & geodesic cones & + repair rounds (2) & 4\,620\,730 & 224\,508 & 8 & $0.004\%$ \\
 20 & geodesic cones & + tangency threshold $0.05$ & 6\,187\,942 & 305\,531 & 20 & $0.007\%$ \\
-20 & geodesic cones & + both & 6\,187\,942 & 305\,556 & 18 & $0.006\%$ \\
+20 & geodesic cones & + both & 6\,188\,286 & 305\,556 & 18 & $0.006\%$ \\
 \bottomrule
 \end{tabular}
 \end{center}
 At depth $20$ only $14$ of $224\,439$ cells fail in base mode.
-(The leaf counts are taken before the repair rounds, which bisect only
-the few bad cells.) Repair rounds still halve that number, but the
+Repair rounds still halve that number, but the
 tangency threshold no longer helps: it adds a third more leaves, and the rate stays near
 $0.006\%$.
 
@@ -1295,15 +1301,19 @@ Maubach bisection of a balanced seed, Newton crossings on $2$-faces, and
 continuation through a pointerless mesh. Working in $\CP^2$ removes charts,
 cuts and the special role of infinity. Balance of the seed is what makes
 both bisection and the pointerless neighbor procedure work on a closed
-manifold.
+manifold, and the same code runs unchanged on $\CP^1\times\CP^1$ once its
+seed and geometry are swapped.
 
 The method has clear limits.
 \begin{itemize}[itemsep=1pt]
 \item It is not certified. The bad-cell rate decreases with depth but does
   not vanish, and the topology is checked only a posteriori, through
   necessary conditions.
-\item It assumes a smooth curve. Singular curves need a different
-  extraction near the singular points.
+\item It assumes a smooth curve. At the cusp that $\CP^1\times\CP^1$
+  creates on the elliptic curve, $5$ to $18\%$ of the nearby cells fail at
+  every depth, and some of the others glue with the wrong orientation. The
+  Kähler test removes the latter, but a correct extraction at a singular
+  point needs a different method.
 \item Continuation can miss a small component of $C\cap c$ that meets no
   $2$-face of $c$. A reducible curve needs one starting cell per
   component.
@@ -1317,8 +1327,9 @@ Noshiro--Warschawski theorem, this makes $C\cap c$ the graph of a
 holomorphic function over a complex line. On geodesic faces $F$ is no longer a
 polynomial in the face coordinates, so the enclosures must come from
 interval arithmetic rather than Bernstein coefficients. Other open
-directions are curves of high
-degree, and other closed manifolds that admit small balanced seeds.
+directions are curves of high degree, the Kähler test as a general
+consistency check in $\CP^2$, and other complex surfaces that admit small
+balanced seeds.
 
 \section*{Note on AI assistance}
 The implementation described here was developed with Claude (Anthropic)
