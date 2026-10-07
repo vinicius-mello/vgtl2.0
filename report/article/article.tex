@@ -63,26 +63,19 @@ A smooth plane algebraic curve is a compact Riemann surface and a real
 surface of codimension $2$ in $\CP^2$. Most methods that mesh it work in
 an affine chart or over a branched covering of $\CP^1$, and must
 therefore treat points at infinity, charts or branch cuts separately. We
-triangulate the curve directly inside $\CP^2$. A balanced $15$-vertex
-triangulation of $\CP^2$, due to Gaifullin, is refined adaptively by
-Maubach bisection along Fubini--Study geodesics. The curve is followed
-from cell to cell by a continuation that uses only combinatorial
-neighbor queries, and its intersection with each cell is extracted from
-Newton crossings on triangular $2$-faces. The mesh is pointerless: we
-extend Atalay and Mount's LPT codes from the cube to any balanced seed,
-with a table-driven, floating-point-free neighbor procedure. The output
-is not certified, but its topology is checked a posteriori. Holes left by
-failed cells are closed, and the resulting surface is verified to be
-closed and connected, with Euler characteristic $2-2g$.
-Realizing every triangular face as a Fubini--Study geodesic cone makes
-faces glue exactly; on our test curves, fewer than $0.14\%$ of the cells
-that meet the curve then fail at depth $14$, against $1.8$--$11.6\%$ with
-faces that are flat in affine charts, and the area of the result agrees
-with Wirtinger's theorem to within $0.15\%$.
-Compared at equal resolution with the same pipeline run on a box in an
-affine chart, the intrinsic mesh covers the whole curve, while a box of
-half-width $16$ still misses $0.6$--$1.3\%$ of its area and already needs
-more cells.
+triangulate the curve directly inside $\CP^2$, with no distinguished
+chart. A $15$-vertex triangulation of $\CP^2$, due to Gaifullin, is
+refined adaptively by Maubach bisection along Fubini--Study geodesics,
+and the curve is followed from cell to cell by continuation. In each
+cell, the curve meets the triangular $2$-faces in isolated points, which
+are joined into polygons. Realizing every face as a geodesic cone,
+rather than as a flat triangle in an affine chart, makes the faces shared
+by neighboring cells coincide exactly, so the pieces glue into a closed
+surface, whose topology is checked a posteriori. On our test curves at
+depth $14$, fewer than $0.14\%$ of the cells that meet the curve fail, against
+$1.8$--$11.6\%$ with chart-flat faces; the area agrees with Wirtinger's
+theorem to within $0.15\%$; and, unlike a box in an affine chart at equal
+resolution, the mesh covers the whole curve.
 \end{abstract}
 
 \tableofcontents
@@ -153,7 +146,7 @@ We triangulate $\CP^2$ itself and refine it adaptively around $C$.
   geodesic cones. Faces then glue exactly along geodesic edges, so the
   boundary of every tetrahedral facet is a closed surface and meets $C$ an
   even number of times. Compared with faces that are flat in affine
-  charts, this cuts extraction failures by a factor of $26$ to $180$ on our
+  charts, this cuts extraction failures by a factor of $26$ to $175$ on our
   test curves.
 \item An a-posteriori topological check and a closing step that turn an
   uncertified extraction into a closed surface of the right Euler
@@ -245,7 +238,7 @@ forest in arbitrary dimension.
 \label{sec:prelim}
 % =====================================================================
 
-\subsection{The Fubini--Study geometry of $\CP^2$}
+\subsection{The Fubini--Study geometry of \texorpdfstring{$\CP^2$}{CP2}}
 
 We write points of $\CP^2$ as unit vectors $p\in\C^3$, defined up to a
 phase, with the Hermitian product $\langle p,q\rangle=\sum_k p_k\bar q_k$.
@@ -253,9 +246,21 @@ The Fubini--Study distance is
 \[
   d(p,q)=\arccos\,|\langle p,q\rangle|\in[0,\tfrac{\pi}{2}].
 \]
-To average two points we first align their phases: replacing $q$ by
-$e^{i\theta}q$ with $e^{i\theta}=\overline{\langle p,q\rangle}/|\langle p,q\rangle|$
-makes $\langle p,q\rangle$ real and non-negative. For an aligned pair,
+Linear combinations of representatives are not well defined on $\CP^2$:
+$q$ and $-q$ are the same point, yet $(p+q)/2$ and $(p-q)/2$ are
+different points, and the second vanishes when $q=p$. So, to average two
+points, we first align their phases. If $\langle p,q\rangle\ne0$, that
+is, if $d(p,q)<\frac{\pi}{2}$, the representative of $q$
+\emph{aligned to $p$} is
+\[
+  \tilde q=e^{i\theta}q,\qquad
+  e^{i\theta}=\frac{\overline{\langle q,p\rangle}}{|\langle q,p\rangle|},
+\]
+the unique representative of the point $q$ with $\langle\tilde q,p\rangle$
+real and positive. It depends only on the point $q$, not on the vector
+chosen for it, and replacing $p$ by $e^{i\alpha}p$ replaces $\tilde q$ by
+$e^{i\alpha}\tilde q$. Hence $[(1-u)p+u\tilde q]$ depends only on the two
+points and on $u$. For an aligned pair,
 the points $[(1-u)p+uq]$, $u\in[0,1]$, trace the minimizing geodesic from
 $p$ to $q$, since the real plane spanned by $p$ and $q$ is orthogonal to
 the fibers of $\C^3\setminus\{0\}\to\CP^2$. We call $u$ the \emph{linear
@@ -315,7 +320,7 @@ same position in both. Strong compatibility is a statement about
 without the order of the rest, is not enough.
 
 % =====================================================================
-\section{An adaptive mesh of $\CP^2$}
+\section{An adaptive mesh of \texorpdfstring{$\CP^2$}{CP2}}
 \label{sec:mesh}
 % =====================================================================
 
@@ -390,7 +395,7 @@ A \emph{compact} explicit structure stores cells only, each with its $d+1$
 vertex identifiers and $d+1$ neighbor identifiers, i.e.\ $8(d+1)$ bytes
 per cell with 32-bit integers ($40$ bytes for $d=4$) plus bookkeeping for
 levels and the hierarchy. An LPT code needs about
-$L+\log_2(2^dd!)+O(\log d)$ bits for $L$ levels, whatever the dimension.
+$L+\log_2(2^dd!)+O(\log L)$ bits for $L$ levels, whatever the dimension.
 \Cref{sec:exp-cost} compares memory in practice.
 
 \paragraph{LPT codes.}
@@ -641,7 +646,11 @@ by global identifier, with their unit representatives. The face is the
   v(s,t)=(1-s)A+s\,\tilde q(t),\qquad (s,t)\in[0,1]^2,
 \]
 where $\tilde C$ is $C$ aligned to $B$ and $\tilde q(t)$ is $q(t)$
-aligned to $A$. On the boundary, $t=0$, $t=1$ and $s=1$ give the
+aligned to $A$ (\Cref{sec:prelim}). The first alignment makes $q$ the
+geodesic $BC$; the second makes each segment $s\mapsto v(s,t)$ the
+geodesic from $A$ to $q(t)$. By the invariance of alignment, the point
+$[v(s,t)]$ does not depend on the representatives chosen for $A$, $B$,
+$C$. On the boundary, $t=0$, $t=1$ and $s=1$ give the
 geodesics $AB$, $AC$ and $BC$, each traversed by its linear parameter
 from the lower identifier to the higher one. An edge is therefore the
 same curve, with the same parameter, in every face that contains it
@@ -829,11 +838,15 @@ Fermat quartic & $X^4+Y^4+Z^4$ & 3 \\
 \bottomrule
 \end{tabular}
 \end{center}
-Unless stated otherwise, runs use geodesic faces and one fixed random
-rotation of the seed (generator seed $12345$). The scripts that produce
+Unless stated otherwise, runs realize the faces as geodesic cones
+(\Cref{sec:faces}) and use one fixed random rotation of the seed
+(generator seed $12345$). The \emph{base mode} is the continuation of
+\Cref{alg:continuation} at a fixed target depth, without the tangency
+threshold or the repair rounds of \Cref{sec:tangency}; these two
+mechanisms are always reported as additions to it. The scripts that produce
 every table and figure are listed in the code availability statement.
 
-\subsection{Chart-flat versus geodesic faces}
+\subsection{Chart-flat faces versus geodesic cones}
 \label{sec:exp-faces}
 
 Our first implementation realized each face as a flat triangle in its own
@@ -844,13 +857,13 @@ elliptic curve at depth $12$, the bad-cell rate was $0.21\%$ among cells
 whose faces all used the cell's chart and $21\%$ among the others; at
 depth $14$, $0.11\%$ against $14\%$, and $0.10\%$ against $18\%$ for the
 Fermat quartic. More than $97\%$ of the bad cells were of the second
-kind. Geodesic faces remove the seams, and with them most failures
-(depth $14$, continuation only):
+kind. Geodesic cones remove the seams, and with them most failures
+(depth $14$, base mode):
 \begin{center}
 \small
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
-& \multicolumn{2}{c}{chart-flat faces} & \multicolumn{2}{c}{geodesic faces} \\
+& \multicolumn{2}{c}{chart-flat faces} & \multicolumn{2}{c}{geodesic cones} \\
 \cmidrule(lr){2-3}\cmidrule(l){4-5}
 curve & bad cells & rate & bad cells & rate \\
 \midrule
@@ -863,7 +876,7 @@ Fermat quartic & 4\,347 & $11.6\%$ & 53 & $0.136\%$ \\
 \end{center}
 Facets with a single crossing, which \Cref{prop:parity} rules out for
 closed facet boundaries, drop from $672$--$8\,463$ per run to $0$--$8$.
-Geodesic faces cost about $20$--$27\%$ more running time, spent in the
+Geodesic cones cost about $20$--$27\%$ more running time, spent in the
 evaluation of the cone parametrization.
 
 \subsection{Bad-cell rate}
@@ -877,45 +890,47 @@ levels: it is below $0.14\%$ at depth $14$ and below $0.08\%$ at depth $16$
 for all four curves. The tangency threshold
 combined with repair rounds lowers it further, by a factor of up to $6$,
 except for the conic at depths $14$ and $16$, where only two to five
-cells fail in either mode. For the elliptic curve, with the old
-chart-flat faces for reference:
+cells fail in either mode. For the elliptic curve, the first row of each
+depth isolates the effect of the faces (chart-flat faces against geodesic
+cones, both in base mode), and the following rows add the two refinement
+mechanisms to geodesic cones:
 \begin{center}
 \small
-\begin{tabular}{@{}llrrrr@{}}
+\begin{tabular}{@{}lllrrrr@{}}
 \toprule
-depth & mode & leaves & good cells & bad cells & bad rate \\
+depth & faces & refinement & leaves & good cells & bad cells & bad rate \\
 \midrule
-14 & chart-flat faces, continuation only & 327\,370 & 27\,397 & 887 & $3.136\%$ \\
-14 & continuation only & 326\,260 & 28\,278 & 34 & $0.120\%$ \\
-14 & + repair rounds (2) & 326\,260 & 28\,568 & 13 & $0.045\%$ \\
-14 & + tangency threshold $0.05$ & 505\,654 & 37\,490 & 7 & $0.019\%$ \\
-14 & + both & 505\,654 & 37\,490 & 7 & $0.019\%$ \\
+14 & chart-flat & base & 327\,370 & 27\,397 & 887 & $3.136\%$ \\
+14 & geodesic cones & base & 326\,260 & 28\,278 & 34 & $0.120\%$ \\
+14 & geodesic cones & + repair rounds (2) & 326\,260 & 28\,568 & 13 & $0.045\%$ \\
+14 & geodesic cones & + tangency threshold $0.05$ & 505\,654 & 37\,490 & 7 & $0.019\%$ \\
+14 & geodesic cones & + both & 505\,654 & 37\,490 & 7 & $0.019\%$ \\
 \midrule
-20 & chart-flat faces, continuation only & 4\,620\,102 & 222\,981 & 1\,348 & $0.601\%$ \\
-20 & continuation only & 4\,618\,522 & 224\,425 & 14 & $0.006\%$ \\
-20 & + repair rounds (2) & 4\,618\,522 & 224\,508 & 8 & $0.004\%$ \\
-20 & + tangency threshold $0.05$ & 6\,187\,942 & 305\,531 & 20 & $0.007\%$ \\
-20 & + both & 6\,187\,942 & 305\,556 & 18 & $0.006\%$ \\
+20 & chart-flat & base & 4\,620\,102 & 222\,981 & 1\,348 & $0.601\%$ \\
+20 & geodesic cones & base & 4\,618\,522 & 224\,425 & 14 & $0.006\%$ \\
+20 & geodesic cones & + repair rounds (2) & 4\,618\,522 & 224\,508 & 8 & $0.004\%$ \\
+20 & geodesic cones & + tangency threshold $0.05$ & 6\,187\,942 & 305\,531 & 20 & $0.007\%$ \\
+20 & geodesic cones & + both & 6\,187\,942 & 305\,556 & 18 & $0.006\%$ \\
 \bottomrule
 \end{tabular}
 \end{center}
-At depth $20$ only $14$ of $224\,439$ cells fail with continuation alone.
-Repair rounds still halve that number, but the tangency threshold no
-longer helps: it adds a third more leaves, and the rate stays near
+At depth $20$ only $14$ of $224\,439$ cells fail in base mode.
+(The leaf counts are taken before the repair rounds, which bisect only
+the few bad cells.) Repair rounds still halve that number, but the
+tangency threshold no longer helps: it adds a third more leaves, and the rate stays near
 $0.006\%$.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.78\linewidth]{figures/badrate.pdf}
 \caption{Percentage of touched cells whose extraction fails, against the
-refinement depth. Dashed lines with open markers: continuation alone.
+refinement depth. Dashed lines with open markers: base mode.
 Solid lines: with tangency threshold $0.05$ and two repair rounds.}
 \label{fig:badrate}
 \end{figure}
 
 \paragraph{Causes of failure.}
-We recorded the reason for each failure at depth $14$, with continuation
-only, on the four curves ($114\,016$ good cells and $111$ bad ones):
+We recorded the reason for each failure at depth $14$, in base mode, on the four curves ($114\,016$ good cells and $111$ bad ones):
 \begin{itemize}[itemsep=1pt]
 \item $88\%$ of the bad cells fail on a cycle with more than five nodes,
   $10\%$ on an irregular facet and $2\%$ on node degree;
@@ -979,8 +994,8 @@ $\chi=2-2g$, and Newton's method moved every cone apex onto the curve.
 \subsection{Accuracy}
 
 In the five runs above, $|F|$ at the extracted vertices, with unit-norm
-homogeneous representatives, has median at most $1.4\times10^{-16}$,
-$99$th percentile below $7.5\times10^{-16}$ and maximum below
+homogeneous representatives, has median below $1.5\times10^{-16}$,
+$99$th percentile below $7.7\times10^{-16}$ and maximum below
 $7.2\times10^{-14}$. These are the crossings of $C$ with faces of the
 mesh, so they lie on the curve to working precision.
 
@@ -1002,15 +1017,14 @@ Fermat quartic & 17 & $1.00079$ & $1.00128$ \\
 \bottomrule
 \end{tabular}
 \end{center}
-The area is within $0.15\%$ of the exact value in every run. With
-continuation only, the error decreases steadily with depth
+The area is within $0.15\%$ of the exact value in every run. In base
+mode, the error decreases steadily with depth
 (\texttt{area\_sweep.sh}): for the closed surface it falls from
 $0.40$--$0.92\%$ at depth $10$ to $0.06$--$0.13\%$ at depth $18$ on the
 elliptic curve and the Fermat cubic and quartic, and stays below $0.03\%$
-for the conic. The raw extraction slightly underestimates the area,
-because of its holes, and the closed surface slightly overestimates it,
-because the cones that cap the holes are not flat; both converge to
-$n\pi$.
+for the conic. The closed surface always slightly overestimates the area. The raw
+extraction lies below it by the area of the holes, which can bring it
+slightly under $n\pi$; both converge to $n\pi$.
 
 \subsection{Cost}
 \label{sec:exp-cost}
@@ -1053,12 +1067,12 @@ meet the curve as well: by a factor of $1.2$--$1.5$ at depth $8$,
 $2.0$--$2.6$ at depth $12$ and $3.1$--$4.3$ at depth $14$.
 
 \paragraph{Running time and memory.}
-On one core, with continuation only:
+On one core, in base mode:
 \begin{center}
 \small
 \begin{tabular}{@{}lrrrrrr@{}}
 \toprule
-curve & depth & leaves & meeting $C$ & refine (s) & extract (s) & peak (MB) \\
+curve & depth & leaves & meeting $C$ & refine (s) & extract (s) & peak (MiB) \\
 \midrule
 elliptic & 12 & 169\,304 & 13\,680 & $2.8$ & $1.1$ & $33$ \\
 elliptic & 14 & 326\,260 & 28\,312 & $5.6$ & $2.5$ & $60$ \\
@@ -1072,17 +1086,17 @@ Fermat quartic & 18 & 2\,234\,668 & 156\,936 & $44.4$ & $26.6$ & $438$ \\
 \bottomrule
 \end{tabular}
 \end{center}
-Time grows roughly linearly with the number of leaves, at $25$--$32\,\mu$s
+Time grows roughly linearly with the number of leaves, at $23$--$32\,\mu$s
 per leaf over both phases. Refinement dominates, because every cell that
 continuation visits is extracted once to decide whether the curve
-reaches it. Peak memory is $180$--$290$ bytes per leaf. Most of it is
+reaches it. Peak memory is $190$--$300$ bytes per leaf. Most of it is
 taken by the caches that make extraction consistent: crossings per face,
 vertex identifiers and coordinates, and the set of visited cells. The
 leaf table itself needs $19.5$ bytes per leaf. The tangency threshold and
 repair rounds multiply the running time by $1.4$--$2.9$. With the
 \texttt{nmt<4>} structure, an earlier version of the same pipeline
 needed $4$--$5$\,GB around depth $18$; the pointerless mesh needs
-$0.87$\,GB at depth $20$.
+$867$\,MiB at depth $20$.
 
 
 \subsection{Comparison with an affine chart}
@@ -1153,7 +1167,7 @@ have to be stitched along the overlaps, where the faces are flat in
 different charts and no longer glue: precisely the situation that
 geodesic faces avoid.
 
-\subsection{Comparison with $\CP^1\times\CP^1$}
+\subsection{Comparison with \texorpdfstring{$\CP^1\times\CP^1$}{CP1 x CP1}}
 \label{sec:exp-s2s2}
 
 The product compactification $\CP^1\times\CP^1\supset\C^2$ is the other
@@ -1165,8 +1179,61 @@ closure is singular. In the coordinates $u=1/w$, $v=1/z$ near
 $(\infty,\infty)$ the equation becomes $v^3=u^2(1-v^2)$, a cusp $v^3=u^2$
 at the origin. In $\CP^2$ the closure $X^2Z=Y^3-YZ^2$ is smooth, and the
 method needs no special care at infinity.
-\todo{E3 (optional): measure the bad cells near the cusp with the
-$\CP^1\times\CP^1$ implementation.}
+
+To measure what the cusp costs, we ran the same pipeline on
+$\CP^1\times\CP^1$, changing only the seed and the geometry
+(\texttt{riemann\_s2s2\_glpt}). The seed is the product of two octahedra,
+triangulated by staircases: $36$ vertices and $384$ cells. It is
+balanced: colouring each octahedron by its three antipodal pairs and the
+vertex $(a,b)$ by $\col(a)+\col(b)$ gives every staircase the colours
+$0,\dots,4$ in order. New vertices are Fubini--Study midpoints in each
+factor, faces are geodesic cones built factor by factor as in
+\Cref{sec:faces}, and $F$ is evaluated bihomogeneously, with no chart.
+With the Fubini--Study metric on each factor, a curve of bidegree
+$(n_w,n_z)$ has area $\pi(n_w+n_z)$, which plays the role of Wirtinger's
+theorem. We compare the elliptic curve with the parabola $w^2=z$, whose
+closure $v=u^2$ is smooth at the corner, in base mode; ``near'' means a
+cell with a vertex within $0.1$ of $(\infty,\infty)$ in the product
+metric:
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrrc@{}}
+\toprule
+curve & depth & bad near / near & bad elsewhere & area$/\pi(n_w{+}n_z)$ & closed $\chi$ \\
+\midrule
+elliptic & 12 & 19 / 111 & $0.092\%$ & $1.00044$ & $0$ \\
+         & 14 & 23 / 300 & $0.058\%$ & $1.00024$ & $0$ \\
+         & 16 & 30 / 576 & $0.042\%$ & $1.00012$ & $0$ \\
+\midrule
+parabola & 12 & 0 / 42  & $0.065\%$ & $0.99947$ & $2$ \\
+         & 14 & 0 / 124 & $0.021\%$ & $0.99971$ & $2$ \\
+         & 16 & 0 / 232 & $0.014\%$ & $0.99987$ & $2$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+Away from the corner both curves behave as in $\CP^2$. At the corner the
+parabola has no failure at all, while $5$ to $18\%$ of the elliptic
+curve's cells there fail, at every depth and in five further rotations of
+the seed at depth $14$. Their number grows slowly with depth while the
+area they cover shrinks, as expected near a singular point where the
+curvature of $C$ is unbounded.
+
+The cusp also affects the cells that do not fail. Some of their polygons
+cut across the cusp instead of following the curve, and they glue with
+the wrong orientation: without further care the extracted complex is not
+orientable, and closing it gives $\chi=-1$. A holomorphic curve carries a
+canonical orientation, and the Kähler form $\omega$ of the ambient space
+restricts to its area form, so a polygon close to the curve has
+$|\omega|/\mathrm{area}$ close to $1$, the value attained exactly on
+complex lines. Treating as bad every cell with a polygon below $0.9$
+removes $1$ to $18$ cells of the elliptic curve per run, mostly near the
+corner, and at most one of the parabola; the closed surface is then an
+orientable torus in all nine runs of \texttt{s2s2\_sweep.sh}. The test
+applies equally in $\CP^2$, where we have not needed it. Our earlier $\CP^1\times\CP^1$ implementation, with
+chart-flat faces and a switch to the chart $(1/w,1/z)$ near the corner,
+failed at the corner for both curves; with geodesic cones that failure
+disappears, which isolates the cost of the cusp. In $\CP^2$ the closure is
+smooth and neither the cusp nor the corner arises.
 
 % =====================================================================
 \section{Visualization}

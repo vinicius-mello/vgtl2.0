@@ -1,3 +1,4 @@
+#include <array>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -489,8 +490,24 @@ double branch_gap_corner(cx zr) {
 	return std::pow(mag,1.0/(g_F.n*(g_F.n-1)));
 }
 
+// --sphere-gap (experimental, n=2 only): the gap between the two
+// w-sheets as a CHORDAL distance on the w-sphere, consistent with
+// cell_diam, instead of branch_gap's chart-unit |w1-w2| (which grows
+// like |z|^{3/2} toward the (inf,inf) corner for w^2=z^3-z, so the
+// sphere-diameter/chart-gap priority there falls below --threshold and
+// the corner is never refined -- measured with --cusp-diag).
+bool g_sphere_gap=false;
+double branch_gap_sphere(const vec<3,double>& zs) {
+	cx z=GC*from_sphere(zs)+GD;
+	cx b=g_F.f(1,z), c=g_F.f(0,z);
+	cx sq=std::sqrt(b*b-4.0*c);
+	cx w1=((-b+sq)/2.0-GB)/GA, w2=((-b-sq)/2.0-GB)/GA;
+	return 2.0*std::abs(w1-w2)/std::sqrt((1.0+std::norm(w1))*(1.0+std::norm(w2)));
+}
+
 void compute_vertex_data(T& t, Vertex(T) v) {
 	cx z=from_sphere(z_sphere(t,v));
+	if(g_sphere_gap && g_F.n==2) { attr(t,v)->tval=branch_gap_sphere(z_sphere(t,v)); return; }
 	// Cached local branch-gap estimate (small = close to a branch
 	// point); cell_priority() below combines this with the cell's own
 	// w-extent, since "close to branch point" alone doesn't say the
@@ -1485,6 +1502,15 @@ double g_onion_scale=0.3;
 // meaningful there yet.
 double g_cutoff=1e300;
 
+// --cusp-diag: bin extracted cells by their distance to the corner
+// (w,z)=(inf,inf), where the closure of e.g. w^2=z^3-z has a cusp in
+// CP^1 x CP^1 (u=1/w, v=1/z: v^3=u^2(1-v^2)). Distance of a cell = min
+// over its crossing nodes of the product-chordal distance
+// sqrt(|S(w)-N|^2+|S(z)-N|^2), S = to_sphere, N = north pole.
+bool g_cusp_diag=false;
+long g_node_ratio[4]={0,0,0,0};
+long g_far_pole=0, g_far_nopole=0, g_pole_cells=0; double g_pole_area=0;
+
 // 4D (w,z) in C_infty^2 -> 3D, for a first look at the extracted
 // surface. Two modes:
 // - flat (default): (Re w, Im w, Re z). Throws away Im(z) entirely, so
@@ -1580,6 +1606,10 @@ int main(int argc, char* argv[]) {
 			g_cutoff=atof(argv[++i]);
 		} else if(arg=="--proximity") {
 			g_proximity=true;
+		} else if(arg=="--sphere-gap") {
+			g_sphere_gap=true;
+		} else if(arg=="--cusp-diag") {
+			g_cusp_diag=true;
 		} else if(arg=="--bernstein") {
 			g_bernstein=true;
 		} else if(arg=="--bernstein-level" && i+1<argc) {
@@ -1594,7 +1624,7 @@ int main(int argc, char* argv[]) {
 			cerr<<"unrecognized argument: "<<arg<<endl;
 			cerr<<"usage: "<<argv[0]<<" [--function N] [--generic] [--generic-seed N] [--depth N] "
 					<<"[--threshold X] [--onion] [--onion-scale X] [--cutoff X] [--proximity] "
-					<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--list-functions]"<<endl;
+					<<"[--bernstein] [--bernstein-level N] [--bernstein-selftest] [--cusp-diag] [--list-functions]"<<endl;
 			return 1;
 		}
 	}
@@ -1955,6 +1985,41 @@ int main(int argc, char* argv[]) {
 	// into cycles of 3 or more points (checked, not assumed -- a sigma
 	// with more than one cycle means more than one sheet threads it).
 
+	if(g_cusp_diag) {
+		// Every current cell, binned by the min over its vertices of the
+		// product-chordal distance to (inf,inf): how refined the corner
+		// region is, and what cell_priority sees there.
+		static const double E[]={0.02,0.05,0.1,0.2,0.5,1e300};
+		int n[6]={0}, lmax[6]={0}, lmin[6]; double lsum[6]={0}, pmax[6]={0}, gmin[6], dmin_b[6];
+		for(int b=0;b<6;++b) { lmin[b]=99; gmin[b]=1e300; dmin_b[b]=1e300; }
+		vec<3,double> N; N[0]=0; N[1]=0; N[2]=1;
+		Cell_it(T) ci,cend;
+		for(simplices(t,ci,cend); ci!=cend; ++ci) {
+			Cell(T) sigma=*ci;
+			if(!is_current(t,sigma)) continue;
+			vgtl::array<Vertex(T),DIM+1> vs; vertices(t,sigma,vs);
+			double dm=1e300, g=1e300;
+			for(int i=0;i<=DIM;++i) {
+				double dw=sphere_dist(w_sphere(t,vs[i]),N), dz=sphere_dist(z_sphere(t,vs[i]),N);
+				dm=std::min(dm,sqrt(dw*dw+dz*dz));
+				g=std::min(g,tval(t,vs[i]));
+			}
+			int b=0; while(b<5 && dm>=E[b]) ++b;
+			int l=level(t,sigma);
+			++n[b]; lsum[b]+=l; lmax[b]=std::max(lmax[b],l); lmin[b]=std::min(lmin[b],l);
+			pmax[b]=std::max(pmax[b],cell_priority(t,sigma));
+			gmin[b]=std::min(gmin[b],g); dmin_b[b]=std::min(dmin_b[b],cell_diam(t,vs));
+		}
+		cout<<"current cells by vertex distance to (inf,inf): count, level min/mean/max, max priority, min tval, min diam"<<endl;
+		double lo=0;
+		for(int b=0;b<6;++b) {
+			if(n[b]) cout<<"  cells ["<<lo<<","<<E[b]<<"): "<<n[b]<<"  level "<<lmin[b]<<"/"<<lsum[b]/n[b]<<"/"<<lmax[b]
+				<<"  prio "<<pmax[b]<<"  tval "<<gmin[b]<<"  diam "<<dmin_b[b]<<endl;
+			lo=E[b];
+		}
+		cout<<"threshold: "<<threshold<<endl;
+	}
+
 	cout<<endl<<"--- surface extraction ---"<<endl;
 
 	int npoly_out[8]={0,0,0,0,0,0,0,0}; // indexed by polygon size (3..7)
@@ -1963,6 +2028,41 @@ int main(int argc, char* argv[]) {
 	int ok_cells=0, bad_cells=0;
 	int ok_by_level[32]={0}, bad_by_level[32]={0};
 	double fres_min=1e300, fres_max=0;
+	static const double cusp_edges[]={0.02,0.05,0.1,0.2,0.5,1e300};
+	static const int ncusp=6;
+	int ok_by_cusp[ncusp]={0}, bad_by_cusp[ncusp]={0};
+	double area_by_cusp[ncusp]={0};
+	// Polygons with an edge longer than 2x their cell's product diameter:
+	// crossings that a chart-flat face placed far from the cell itself.
+	int nspike=0, npoly_total=0; double area_spike=0, area_total=0;
+	int nspike_far=0; // ... of which the cell has a vertex with |w| or |z| > 10
+	// Area of an output polygon in the product of unit spheres, fanned
+	// into flat triangles of (S(w),S(z)) in R^6 -- converges to the true
+	// area, 4*pi*(a+b) for a curve of bidegree (a,b).
+	auto poly_area6=[&](const vector<crossing_node>& nodes, const vector<int>& cyc) {
+		auto P=[&](int q) { vec<3,double> a=to_sphere(nodes[q].w), b=to_sphere(nodes[q].z);
+			std::array<double,6> p={a[0],a[1],a[2],b[0],b[1],b[2]}; return p; };
+		std::array<double,6> p0=P(cyc[0]);
+		double A=0;
+		for(size_t k=1;k+1<cyc.size();++k) {
+			std::array<double,6> p1=P(cyc[k]), p2=P(cyc[k+1]);
+			double uu=0,vv=0,uv=0;
+			for(int i=0;i<6;++i) { double u=p1[i]-p0[i], v=p2[i]-p0[i]; uu+=u*u; vv+=v*v; uv+=u*v; }
+			A+=0.5*sqrt(std::max(0.0,uu*vv-uv*uv));
+		}
+		return A;
+	};
+	auto cusp_bin=[&](const vector<crossing_node>& nodes) {
+		vec<3,double> N; N[0]=0; N[1]=0; N[2]=1;
+		double dmin=1e300;
+		for(size_t q=0;q<nodes.size();++q) {
+			double dw=sphere_dist(to_sphere(nodes[q].w),N);
+			double dz=sphere_dist(to_sphere(nodes[q].z),N);
+			dmin=std::min(dmin,sqrt(dw*dw+dz*dz));
+		}
+		int b=0; while(b<ncusp-1 && dmin>=cusp_edges[b]) ++b;
+		return b;
+	};
 
 	obj_writer obj(obj_path);
 
@@ -2091,10 +2191,60 @@ int main(int argc, char* argv[]) {
 			if(!decompose_ok) {
 				++bad_cells;
 				++bad_by_level[level(t,sigma)];
+				if(g_cusp_diag) ++bad_by_cusp[cusp_bin(nodes)];
 				continue;
 			}
 			++ok_cells;
 			++ok_by_level[level(t,sigma)];
+			if(g_cusp_diag) {
+				int b=cusp_bin(nodes);
+				++ok_by_cusp[b];
+				vgtl::array<Vertex(T),DIM+1> cvs; vertices(t,sigma,cvs);
+				double cd=cell_diam(t,cvs);
+				bool bigchart=false;
+				for(int i=0;i<=DIM;++i)
+					if(std::abs(from_sphere(w_sphere(t,cvs[i])))>10 || std::abs(from_sphere(z_sphere(t,cvs[i])))>10) bigchart=true;
+				// a pole of either factor within the cell's own extent in that factor
+				bool pole_near=false;
+				{
+					vec<3,double> N; N[0]=0; N[1]=0; N[2]=1;
+					double dwN=1e300, dzN=1e300, wd=0, zd=0;
+					for(int i=0;i<=DIM;++i) {
+						dwN=std::min(dwN,sphere_dist(w_sphere(t,cvs[i]),N));
+						dzN=std::min(dzN,sphere_dist(z_sphere(t,cvs[i]),N));
+						for(int j=i+1;j<=DIM;++j) {
+							wd=std::max(wd,sphere_dist(w_sphere(t,cvs[i]),w_sphere(t,cvs[j])));
+							zd=std::max(zd,sphere_dist(z_sphere(t,cvs[i]),z_sphere(t,cvs[j])));
+						}
+					}
+					pole_near=(dwN<wd)||(dzN<zd);
+					if(pole_near) ++g_pole_cells;
+				}
+				for(size_t p=0;p<cycles_idx.size();++p) {
+					double A=poly_area6(nodes,cycles_idx[p]);
+					if(pole_near) g_pole_area+=A;
+					area_by_cusp[b]+=A; area_total+=A; ++npoly_total;
+					const vector<int>& cyc=cycles_idx[p];
+					double emax=0;
+					for(size_t k=0;k<cyc.size();++k) {
+						const crossing_node& P=nodes[cyc[k]]; const crossing_node& Q=nodes[cyc[(k+1)%cyc.size()]];
+						double dw=sphere_dist(to_sphere(P.w),to_sphere(Q.w)), dz=sphere_dist(to_sphere(P.z),to_sphere(Q.z));
+						emax=std::max(emax,sqrt(dw*dw+dz*dz));
+					}
+					if(emax>2*cd) { ++nspike; area_spike+=A; if(bigchart) ++nspike_far; }
+					// node-to-cell: min distance from each node to the cell's vertices
+					for(size_t k=0;k<cyc.size();++k) {
+						const crossing_node& P=nodes[cyc[k]];
+						double dmin=1e300;
+						for(int i=0;i<=DIM;++i) {
+							double dw=sphere_dist(to_sphere(P.w),w_sphere(t,cvs[i])), dz=sphere_dist(to_sphere(P.z),z_sphere(t,cvs[i]));
+							dmin=std::min(dmin,sqrt(dw*dw+dz*dz));
+						}
+						double r=dmin/cd; int rb=r<0.5?0:r<1?1:r<2?2:3; ++g_node_ratio[rb];
+						if(r>=1) { if(pole_near) ++g_far_pole; else ++g_far_nopole; }
+					}
+				}
+			}
 
 			for(size_t q=0;q<nodes.size();++q) {
 				if(adj[q].empty()) continue;
@@ -2133,6 +2283,24 @@ int main(int argc, char* argv[]) {
 	cout<<"ok/bad cells by cell level:"<<endl;
 	for(int l=0;l<32;++l) if(ok_by_level[l]||bad_by_level[l])
 		cout<<"  level "<<l<<": ok="<<ok_by_level[l]<<" bad="<<bad_by_level[l]<<endl;
+
+	if(g_cusp_diag) {
+		cout<<"ok/bad cells by distance to (inf,inf) on S^2 x S^2:"<<endl;
+		double lo=0;
+		for(int b=0;b<ncusp;++b) {
+			cout<<"  cusp ["<<lo<<", "<<(cusp_edges[b]>1e299?"inf":std::to_string(cusp_edges[b]))<<"): ok="
+				<<ok_by_cusp[b]<<" bad="<<bad_by_cusp[b]<<" area="<<area_by_cusp[b]<<endl;
+			lo=cusp_edges[b];
+		}
+		double At=0; for(int b=0;b<ncusp;++b) At+=area_by_cusp[b];
+		cout<<"product-sphere area of output: "<<At<<" = "<<At/(4.0*std::acos(-1.0))<<" * 4pi"<<endl;
+		cout<<"spike polygons (edge > 2x cell diameter): "<<nspike<<" of "<<npoly_total
+			<<", area "<<area_spike/(4.0*std::acos(-1.0))<<" * 4pi; in cells with a vertex at |w| or |z| > 10: "<<nspike_far<<endl;
+		cout<<"node distance to nearest cell vertex / cell diam: <0.5: "<<g_node_ratio[0]<<" 0.5-1: "<<g_node_ratio[1]<<" 1-2: "<<g_node_ratio[2]<<" >2: "<<g_node_ratio[3]<<endl;
+		cout<<"nodes >= 1 cell diam away: in cells around a pole "<<g_far_pole<<", elsewhere "<<g_far_nopole
+			<<"; ok cells around a pole: "<<g_pole_cells<<", their area "<<g_pole_area/(4.0*std::acos(-1.0))<<" * 4pi"<<endl;
+		cout<<"area without spikes: "<<(area_total-area_spike)/(4.0*std::acos(-1.0))<<" * 4pi"<<endl;
+	}
 
 	return 0;
 }

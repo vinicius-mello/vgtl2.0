@@ -7,7 +7,8 @@
 #             CAMERA=x,y,z,rx,ry,rz,ortho)
 #   badrate.pdf:       badrate_sweep.sh + fig_badrate.py
 #   Tables:   causes_sweep.sh, genus_sweep.sh, rotation_sweep.sh, modes_table.sh,
-#             continuation_check.sh, cost_sweep.sh, area_sweep.sh, affine_sweep.sh
+#             continuation_check.sh, cost_sweep.sh, area_sweep.sh, affine_sweep.sh,
+#             s2s2_sweep.sh (CP^1 x CP^1, examples/top/riemann_s2s2_glpt)
 # (badrate_chartflat.csv / rotations_chartflat.csv keep the measurements
 #  made with the old chart-flat faces, before geodesic faces became default.)
 # Also prints the genus check of both rendered meshes.
@@ -50,3 +51,4 @@ $PY fig_badrate.py
 ./cost_sweep.sh
 ./area_sweep.sh
 ./affine_sweep.sh
+./s2s2_sweep.sh

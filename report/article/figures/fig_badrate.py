@@ -1,7 +1,7 @@
 """Bad-cell rate versus refinement depth (reads badrate.csv written by
 badrate_sweep.sh).  One colour + marker per curve (fixed categorical order,
 palette validated for CVD separation); solid = tangency threshold + repair
-rounds, dashed = baseline.  Output: badrate.pdf"""
+rounds, dashed = base mode.  Output: badrate.pdf"""
 import csv
 from collections import defaultdict
 import matplotlib
@@ -52,7 +52,7 @@ ax.grid(True, which="major", color="0.88", lw=0.5)
 ax.grid(True, which="minor", axis="y", color="0.94", lw=0.4)
 for s in ("top", "right"):
     ax.spines[s].set_visible(False)
-handles = [Line2D([], [], color="0.3", ls=(0, (4, 2)), lw=1.0, marker="o", mfc="white", mec="0.3", label="baseline"),
+handles = [Line2D([], [], color="0.3", ls=(0, (4, 2)), lw=1.0, marker="o", mfc="white", mec="0.3", label="base mode"),
            Line2D([], [], color="0.3", ls="-", lw=2.0, marker="o", mfc="0.3", mec="0.3",
                   label="tangency threshold + repair")]
 ax.legend(handles=handles, loc="upper right", frameon=False, fontsize=8)
