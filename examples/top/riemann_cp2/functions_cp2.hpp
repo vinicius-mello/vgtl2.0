@@ -14,6 +14,8 @@
 #include <complex>
 #include <string>
 #include <iostream>
+#include <random>
+#include <cmath>
 
 typedef std::complex<double> cx;
 
@@ -173,6 +175,38 @@ inline std::vector<catalog_entry_cp2>& function_catalog_cp2() {
 				"(w=X/Z,z=Y/Z); smooth elliptic curve (genus 1), branch points at z=0,+1,-1. Hits "
 				"2/15 Gaifullin seed vertices exactly -- needs --generic-seed";
 			e.F = mono(2,0,1,cx(1,0)) + mono(0,3,0,cx(-1,0)) + mono(0,1,2,cx(1,0));
+			cat.push_back(e);
+		}
+		// Higher degree (article v3, experiment E4). Fermat curves of degree
+		// 5 and 6, and Kostlan random curves of degree 3..6: coefficient of
+		// X^i Y^j Z^k a complex Gaussian of variance d!/(i!j!k!), the
+		// unitarily invariant ensemble, so the curve has no special position
+		// relative to the seed; smooth with probability 1 (checked a
+		// posteriori by the genus check and Wirtinger's theorem). Fixed
+		// generator seed 2026+d, so the curves are reproducible.
+		for(int d=5; d<=6; ++d) {
+			catalog_entry_cp2 e;
+			e.name="fermat_"+std::to_string(d);
+			e.description="X^"+std::to_string(d)+"+Y^"+std::to_string(d)+"+Z^"+std::to_string(d)
+				+"=0 : Fermat curve of degree "+std::to_string(d)+", genus "+std::to_string((d-1)*(d-2)/2);
+			e.F = mono(d,0,0,cx(1,0)) + mono(0,d,0,cx(1,0)) + mono(0,0,d,cx(1,0));
+			cat.push_back(e);
+		}
+		for(int d=3; d<=6; ++d) {
+			std::mt19937 rng(2026+d);
+			std::normal_distribution<double> nd(0.0,1.0);
+			auto fact=[](int n){ double f=1; for(int k=2;k<=n;++k) f*=k; return f; };
+			catalog_entry_cp2 e;
+			e.name="kostlan_"+std::to_string(d);
+			e.description="Kostlan random curve of degree "+std::to_string(d)+" (genus "
+				+std::to_string((d-1)*(d-2)/2)+"), generator seed "+std::to_string(2026+d);
+			e.F.d=d;
+			for(int i=d;i>=0;--i) for(int j=d-i;j>=0;--j) {
+				int k=d-i-j;
+				double sd=std::sqrt(fact(d)/(fact(i)*fact(j)*fact(k))/2.0);
+				term3 t; t.e[0]=i; t.e[1]=j; t.e[2]=k; t.c=cx(sd*nd(rng),sd*nd(rng));
+				e.F.t.push_back(t);
+			}
 			cat.push_back(e);
 		}
 	}

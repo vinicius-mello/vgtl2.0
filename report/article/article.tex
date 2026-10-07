@@ -815,6 +815,10 @@ $g=(2c-b-\chi)/2$, where $c$ is the number of components and $b$ the number
 of boundary loops. A closing step then turns the complex into a closed
 surface:
 \begin{itemize}[itemsep=1pt]
+\item it removes every polygon on an edge shared by more than two
+  polygons. Each cell passes its own checks, but the cells do not agree
+  there; we have seen this only at near-tangencies, where a $2$-face
+  carries two close crossings and several cells join them;
 \item it keeps the main component;
 \item it caps each hole by a cone from a new apex, placed at the loop's
   Fubini--Study barycenter and moved onto $C$ by Newton's method;
@@ -1031,6 +1035,60 @@ elliptic curve and the Fermat cubic and quartic, and stays below $0.03\%$
 for the conic. The closed surface always slightly overestimates the area. The raw
 extraction lies below it by the area of the holes, which can bring it
 slightly under $n\pi$; both converge to $n\pi$.
+
+\subsection{Higher degree}
+\label{sec:exp-degree}
+
+To see how the method scales with the degree, we added the Fermat
+curves of degree $5$ and $6$ and, for $n=3,\dots,6$, a random curve from
+the Kostlan ensemble: the coefficient of $X^iY^jZ^k$ is a complex
+Gaussian of variance $n!/(i!\,j!\,k!)$. This distribution is invariant
+under unitary changes of coordinates, so the curve has no special
+position relative to the seed, and the curve is smooth with probability
+$1$. At depth $16$ (\texttt{degree\_sweep.sh}):
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+& & & & \multicolumn{2}{c}{bad rate} & & \\
+\cmidrule(lr){5-6}
+curve & $n$ & $g$ & meeting $C$ & base & combined & area$/n\pi$ & time (s) \\
+\midrule
+Fermat & 3 & 1  & 54\,272  & $0.044\%$ & $0.035\%$ & $1.00127$ & $27$ \\
+       & 4 & 3  & 76\,531  & $0.077\%$ & $0.040\%$ & $1.00193$ & $36$ \\
+       & 5 & 6  & 93\,694  & $0.084\%$ & $0.040\%$ & $1.00257$ & $42$ \\
+       & 6 & 10 & 114\,605 & $0.079\%$ & $0.036\%$ & $1.00321$ & $51$ \\
+\midrule
+Kostlan & 3 & 1  & 51\,736  & $0.070\%$ & $0.026\%$ & $1.00081$ & $29$ \\
+        & 4 & 3  & 70\,118  & $0.086\%$ & $0.025\%$ & $1.00150$ & $46$ \\
+        & 5 & 6  & 94\,033  & $0.088\%$ & $0.044\%$ & $1.00233$ & $76$ \\
+        & 6 & 10 & 103\,462 & $0.100\%$ & $0.051\%$ & $1.00335$ & $111$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+``Combined'' is tangency threshold $0.05$ with two repair rounds; the
+area is that of the closed surface, the time that of the base mode. Up to
+degree $6$ the method does not degrade:
+\begin{itemize}[itemsep=1pt]
+\item the number of cells that meet $C$ grows like the area $n\pi$, with
+  $17$--$19$ thousand cells per unit of degree, so the cost of a curve is
+  proportional to its degree at fixed depth;
+\item the bad-cell rate grows only from $0.04$ to $0.10\%$ in base mode,
+  and stays at $0.025$--$0.051\%$ with refinement near tangencies;
+\item in all $48$ runs (depths $12$, $14$ and $16$, both modes) the closed
+  surface is connected and has $\chi=2-2g$, up to genus $10$; $|F|$ at
+  the extracted vertices is below $1.8\times10^{-15}$;
+\item the closed surface overestimates the area by $0.08$ to $0.34\%$,
+  more for higher degree; the raw extraction is within $0.14\%$.
+\end{itemize}
+Higher degree means more curvature per cell at a given depth, and with
+it more near-tangencies. On the Fermat sextic, three runs produced an
+edge shared by four polygons: a $2$-face with two crossings $0.035$ apart,
+joined by several cells that each pass their own checks. Removing these
+polygons before closing (\Cref{sec:topology}) gives the right genus in
+all three. The Kostlan curves are slower than the Fermat curves of the
+same degree because their polynomials are dense ($28$ terms for $n=6$,
+against $3$), and evaluating $F$ dominates the running time.
 
 \subsection{Cost}
 \label{sec:exp-cost}
@@ -1327,7 +1385,7 @@ Noshiro--Warschawski theorem, this makes $C\cap c$ the graph of a
 holomorphic function over a complex line. On geodesic faces $F$ is no longer a
 polynomial in the face coordinates, so the enclosures must come from
 interval arithmetic rather than Bernstein coefficients. Other open
-directions are curves of high degree, the Kähler test as a general
+directions are curves of degree well beyond $6$, the Kähler test as a general
 consistency check in $\CP^2$, and other complex surfaces that admit small
 balanced seeds.
 

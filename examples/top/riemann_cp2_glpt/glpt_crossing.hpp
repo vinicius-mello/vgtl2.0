@@ -393,13 +393,17 @@ inline int compute_face_crossing_geo(const pt3 p[3], const int id[3], pt3 out_pt
 		double lB=seeds[k][0], lC=seeds[k][1];
 		double s=lB+lC, t=(s>1e-12)? lC/s : 0.5;
 		if(!geo_newton(g,s,t)) continue;
+		// the root itself may lie up to 1e-6 outside [0,1]^2: clamp only the
+		// coordinates used to classify it, not the point (clamping the point
+		// moves it off the curve by ~1e-6 |grad F|)
+		pt3 root=geo_point(g,s,t);
 		s=std::min(1.0,std::max(0.0,s)); t=std::min(1.0,std::max(0.0,t));
 		double l[3]={1.0-s, s*(1.0-t), s*t};
 		bool dup=false;
 		for(int r=0;r<nfound;++r) if(std::fabs(found_l[r][1]-l[1])<1e-7 && std::fabs(found_l[r][2]-l[2])<1e-7) dup=true;
 		if(dup) continue;
 		for(int q=0;q<3;++q) found_l[nfound][q]=l[q];
-		out_pts[nfound]=normalize3(geo_point(g,s,t));
+		out_pts[nfound]=normalize3(root);
 		for(int q=0;q<3;++q) out_bary[nfound][ord[q]]=l[q]; // back to the caller's order
 		++nfound;
 	}

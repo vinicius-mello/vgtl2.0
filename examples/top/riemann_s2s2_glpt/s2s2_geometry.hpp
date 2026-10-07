@@ -252,13 +252,14 @@ inline int compute_face_crossing(const pp p[3], const int id[3], pp out_pts[2], 
 		double lB=seeds[k][0], lC=seeds[k][1];
 		double s=lB+lC, t=(s>1e-12)? lC/s : 0.5;
 		if(!geo_newton(g,s,t)) continue;
+		pp root=geo_point(g,s,t); // the root itself; clamp only the classifying coordinates
 		s=std::min(1.0,std::max(0.0,s)); t=std::min(1.0,std::max(0.0,t));
 		double l[3]={1.0-s, s*(1.0-t), s*t};
 		bool dup=false;
 		for(int r=0;r<nfound;++r) if(std::fabs(found_l[r][1]-l[1])<1e-7 && std::fabs(found_l[r][2]-l[2])<1e-7) dup=true;
 		if(dup) continue;
 		for(int q=0;q<3;++q) found_l[nfound][q]=l[q];
-		out_pts[nfound]=pp_normalize(geo_point(g,s,t));
+		out_pts[nfound]=pp_normalize(root);
 		for(int q=0;q<3;++q) out_bary[nfound][ord[q]]=l[q];
 		++nfound;
 	}

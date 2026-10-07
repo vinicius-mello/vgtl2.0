@@ -482,6 +482,26 @@ bool g_global_scan=false; // continuation from all 108 roots instead of the firs
 bool g_timing=false;      // phase timings + peak RSS
 bool g_leaf_hash=false;   // order-independent hash of the final leaf set
 bool g_neighbor_test=false; // every leaf's facet neighbours must carry the facet's 4 vertices, at the same points
+// --kahler-filter X: omega/area of an extracted polygon, omega the
+// Fubini-Study Kahler form, on the fan at its first vertex with tangent
+// vectors in the horizontal space. By Wirtinger it is +-1 exactly on
+// complex lines, so a polygon close to the curve has |ratio| near 1; a cell
+// with a polygon below X is treated as bad (examples/top/riemann_s2s2_glpt
+// has the same test, where it removes polygons cutting across a cusp).
+double g_kahler_filter=0;
+long g_kahler_rejected=0;
+double polygon_kahler_ratio(const std::vector<crossing_node>& nodes, const std::vector<int>& cyc) {
+	auto tang=[](const pt3& a, const pt3& b){ pt3 e=align_phase(a,b); for(int k=0;k<3;++k) e[k]-=a[k];
+		cx c=hdot(e,a); for(int k=0;k<3;++k) e[k]-=c*a[k]; return e; };
+	pt3 a=normalize3(nodes[cyc[0]].p); double om=0, ar=0;
+	for(size_t i=1;i+1<cyc.size();++i) {
+		pt3 e1=tang(a,normalize3(nodes[cyc[i]].p)), e2=tang(a,normalize3(nodes[cyc[i+1]].p));
+		cx h=hdot(e2,e1);
+		double n1=hdot(e1,e1).real(), n2=hdot(e2,e2).real();
+		om+=0.5*h.imag(); ar+=0.5*std::sqrt(std::max(0.0,n1*n2-h.real()*h.real()));
+	}
+	return ar>0 ? om/ar : 1.0;
+}
 // --box R: the affine-chart baseline. The seed is Kuhn's triangulation of
 // the cube [-R,R]^4 in the coordinates (Re x, Im x, Re y, Im y) of the
 // chart Z=1: 16 corners (id = bitmask of the coordinates at +R) and 24
@@ -564,6 +584,23 @@ static pt3 newton_onto_curve(pt3 p, bool& ok) {
 }
 void close_surface(std::vector<pt3>& P, std::vector<std::vector<int> >& faces) {
 	int nv=(int)P.size();
+	// (0) drop every polygon on a non-manifold edge (one shared by more than
+	// two polygons): each cell passed its own checks, but their polygons do
+	// not form a surface there -- seen at near-tangencies, where a 2-face
+	// carries two close crossings and several cells join them. The hole is
+	// capped in (3) like the hole of a bad cell.
+	int nonman_dropped=0;
+	{
+		std::map<std::pair<int,int>,int> ec;
+		for(auto& f: faces) for(size_t i=0;i<f.size();++i) { int a=f[i], b=f[(i+1)%f.size()]; ec[std::make_pair(std::min(a,b),std::max(a,b))]++; }
+		std::vector<std::vector<int> > keep;
+		for(auto& f: faces) {
+			bool bad=false;
+			for(size_t i=0;i<f.size() && !bad;++i) { int a=f[i], b=f[(i+1)%f.size()]; if(ec[std::make_pair(std::min(a,b),std::max(a,b))]>2) bad=true; }
+			if(bad) ++nonman_dropped; else keep.push_back(f);
+		}
+		faces.swap(keep);
+	}
 	// (1) split pinched vertices
 	std::vector<std::vector<std::pair<int,int> > > corners(nv);
 	for(size_t f=0; f<faces.size(); ++f)
@@ -622,6 +659,7 @@ void close_surface(std::vector<pt3>& P, std::vector<std::vector<int> >& faces) {
 	for(auto& f: kept) for(int& x: f) { if(remap[x]<0) { remap[x]=(int)out.size(); out.push_back(NP[x]); } x=remap[x]; }
 	P.swap(out); faces.swap(kept);
 	cout<<endl<<"--- close (topological post-processing in CP^2) ---"<<endl;
+	cout<<"polygons dropped at non-manifold edges: "<<nonman_dropped<<endl;
 	cout<<"pinched vertices split: "<<pinched<<", island faces dropped: "<<dropped
 		<<", holes capped: "<<loopv.size()<<" (cone apex moved onto the curve: "<<onc<<")"<<endl;
 }
@@ -672,6 +710,7 @@ int main(int argc, char* argv[]) {
 		else if(arg=="--global-scan") { g_global_scan=true; }
 		else if(arg=="--box" && i+1<argc) { g_box_R=atof(argv[++i]); }
 		else if(arg=="--neighbor-test") { g_neighbor_test=true; }
+		else if(arg=="--kahler-filter" && i+1<argc) { g_kahler_filter=atof(argv[++i]); }
 		else if(arg=="--fs-diam" && i+1<argc) { g_fs_diam=atof(argv[++i]); }
 		else if(arg=="--timing") { g_timing=true; }
 		else if(arg=="--leaf-hash") { g_leaf_hash=true; }
@@ -994,6 +1033,9 @@ int main(int argc, char* argv[]) {
 			if(g_cause_stats) { ++cz->reason[res.fail_reason]; cz->tv[res.decompose_ok?1:0].push_back(res.min_transversality); cz->diam.push_back(cell_fs_diam(pts)); }
 			*ntouch += res.ntouching_tets;
 			*nbad_t += res.nbad_tets;
+			if(res.decompose_ok && g_kahler_filter>0)
+				for(size_t p=0;p<res.cycles.size();++p)
+					if(std::fabs(polygon_kahler_ratio(res.nodes,res.cycles[p]))<g_kahler_filter) { res.decompose_ok=false; ++g_kahler_rejected; break; }
 			if(!res.decompose_ok) { ++(*bad); if(bad_list) bad_list->push_back(c); return; }
 			++(*ok);
 			for(size_t p=0;p<res.cycles.size();++p) {
@@ -1085,6 +1127,7 @@ int main(int argc, char* argv[]) {
 	cout<<"cells visited: "<<n_cells_visited<<", distinct faces solved: "<<fcache.size()<<endl;
 	if(g_bernstein) cout<<"faces Bernstein-pruned (Newton skipped, certified no root): "<<g_bernstein_pruned_faces<<endl;
 	cout<<"extracted cells: ok="<<ok_cells<<" bad="<<bad_cells<<endl;
+	if(g_kahler_filter>0) cout<<"cells rejected by --kahler-filter (all rounds): "<<g_kahler_rejected<<endl;
 	cout<<"polygon sizes:";
 	for(int sz=3;sz<8;++sz) if(npoly_out[sz]) cout<<" "<<sz<<"-gon="<<npoly_out[sz];
 	cout<<endl;
@@ -1132,6 +1175,24 @@ int main(int argc, char* argv[]) {
 	if(g_bernstein) cout<<"Bernstein fallback seeds used: "<<g_bfallback_tried<<" faces tried, "
 		<<g_bfallback_new_root<<" found a root the fixed/dynamic seeds missed"<<endl;
 
+	if(g_genus_check && getenv("GLPT_NONMANIFOLD_DEBUG")) { // which nodes form a non-manifold edge
+		std::map<std::pair<int,int>,std::vector<int> > ef;
+		for(size_t f=0;f<faces_out.size();++f) { int n=(int)faces_out[f].size();
+			for(int i=0;i<n;++i) { int a=faces_out[f][i], b=faces_out[f][(i+1)%n]; ef[std::make_pair(std::min(a,b),std::max(a,b))].push_back((int)f); } }
+		std::vector<node_key> inv(vert_pts.size());
+		for(auto& kv: vert_index) inv[kv.second]=kv.first;
+		for(auto& e: ef) if(e.second.size()>2) {
+			cout<<"non-manifold edge "<<e.first.first<<"-"<<e.first.second<<" in "<<e.second.size()<<" faces, FS length "
+				<<fs_dist(vert_pts[e.first.first],vert_pts[e.first.second])<<endl;
+			for(int v: {e.first.first,e.first.second}) { const node_key& k=inv[v];
+				cout<<"  node "<<v<<": dim="<<k.dim<<" a="<<k.a<<" b="<<k.b<<" q="<<k.qparam<<endl; }
+			for(int f: e.second) { cout<<"  face "<<f<<":"; for(int x: faces_out[f]) cout<<" "<<x; cout<<endl; }
+		}
+		int worst=-1; double wr=-1; // vertex with the largest |F|
+		for(size_t v=0;v<vert_pts.size();++v) { pt3 u=normalize3(vert_pts[v]); double r=std::abs(eval_poly3(g_F,u[0],u[1],u[2])); if(r>wr) { wr=r; worst=(int)v; } }
+		if(worst>=0) { const node_key& k=inv[worst];
+			cout<<"largest |F| = "<<wr<<" at node "<<worst<<": dim="<<k.dim<<" a="<<k.a<<" b="<<k.b<<" q="<<k.qparam<<endl; }
+	}
 	if(g_genus_check) {
 		int deg=g_F.d;
 		genus_check(faces_out, (int)vert_pts.size(), (deg-1)*(deg-2)/2);
