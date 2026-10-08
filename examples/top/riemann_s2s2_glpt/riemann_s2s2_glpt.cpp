@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <algorithm>
 #include <set>
 #include <fstream>
 #include <iostream>
@@ -448,8 +449,16 @@ int main(int argc, char* argv[]) {
 			if(!res.any_edge) return;
 			double dc=1e300; pp cn=corner_point(); for(int k=0;k<5;++k) dc=min(dc,pdist(pts[k],cn));
 			int b=cusp_bin(dc);
-			if(res.decompose_ok && g_kahler_filter>0)
-				for(auto& cyc: res.cycles) if(std::fabs(polygon_kahler_ratio(res.nodes,cyc))<g_kahler_filter) { res.decompose_ok=false; res.fail_reason=0; ++kahler; break; }
+			// Orient every polygon by the complex orientation: reverse the cycle
+			// when omega/area < 0 (see polygon_kahler_ratio), so faces sharing an
+			// edge traverse it in opposite directions wherever the extraction is
+			// consistent with the curve.
+			if(res.decompose_ok)
+				for(auto& cyc: res.cycles) {
+					double r=polygon_kahler_ratio(res.nodes,cyc);
+					if(g_kahler_filter>0 && std::fabs(r)<g_kahler_filter) { res.decompose_ok=false; res.fail_reason=0; ++kahler; break; }
+					if(r<0) std::reverse(cyc.begin()+1,cyc.end()); // keeps cyc[0], the fan apex
+				}
 			if(!res.decompose_ok) { ++bad; ++reason[res.fail_reason]; ++badb[b]; bad_list.push_back(c); return; }
 			++ok; ++okb[b];
 			for(auto& cyc: res.cycles) { vector<int> f; for(int x: cyc) f.push_back(emit(res.nodes[x])); faces.push_back(f); face_bin.push_back(b); }

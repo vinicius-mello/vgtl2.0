@@ -64,6 +64,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <algorithm>
 #include <set>
 #include <queue>
 #include <fstream>
@@ -1033,9 +1034,16 @@ int main(int argc, char* argv[]) {
 			if(g_cause_stats) { ++cz->reason[res.fail_reason]; cz->tv[res.decompose_ok?1:0].push_back(res.min_transversality); cz->diam.push_back(cell_fs_diam(pts)); }
 			*ntouch += res.ntouching_tets;
 			*nbad_t += res.nbad_tets;
-			if(res.decompose_ok && g_kahler_filter>0)
-				for(size_t p=0;p<res.cycles.size();++p)
-					if(std::fabs(polygon_kahler_ratio(res.nodes,res.cycles[p]))<g_kahler_filter) { res.decompose_ok=false; ++g_kahler_rejected; break; }
+			// Orient every polygon by the complex orientation: reverse the cycle
+			// when omega/area < 0 (see polygon_kahler_ratio). Output faces then
+			// agree with the curve's orientation, whichever way extract_cell()
+			// happened to walk the cycle.
+			if(res.decompose_ok)
+				for(size_t p=0;p<res.cycles.size();++p) {
+					double r=polygon_kahler_ratio(res.nodes,res.cycles[p]);
+					if(g_kahler_filter>0 && std::fabs(r)<g_kahler_filter) { res.decompose_ok=false; ++g_kahler_rejected; break; }
+					if(r<0) std::reverse(res.cycles[p].begin()+1,res.cycles[p].end()); // keeps cyc[0], the fan apex
+				}
 			if(!res.decompose_ok) { ++(*bad); if(bad_list) bad_list->push_back(c); return; }
 			++(*ok);
 			for(size_t p=0;p<res.cycles.size();++p) {
