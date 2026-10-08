@@ -1,0 +1,28 @@
+arXiv submission metadata (paste into the form; the package is built by make_arxiv.sh)
+
+Title:
+Triangulating Plane Algebraic Curves Intrinsically in $\mathbb{CP}^2$
+
+Authors:
+Vinícius Mello (Universidade Federal da Bahia)
+
+Abstract:
+A smooth plane algebraic curve is a compact Riemann surface and a real surface of codimension 2 in $\mathbb{CP}^2$. Most methods that mesh it work in an affine chart or over a branched covering of $\mathbb{CP}^1$, and must therefore treat points at infinity, charts or branch cuts separately. We triangulate the curve directly inside $\mathbb{CP}^2$, with no distinguished chart. A 15-vertex triangulation of $\mathbb{CP}^2$, due to Gaifullin, is refined adaptively by Maubach bisection along Fubini-Study geodesics, and the curve is followed from cell to cell by continuation. In each cell, the curve meets the triangular 2-faces in isolated points, which are joined into polygons. Realizing every face as a geodesic cone, rather than as a flat triangle in an affine chart, makes the faces shared by neighboring cells coincide exactly, so the pieces glue into a closed surface, whose topology is checked a posteriori. On our test curves at depth 14, fewer than 0.14% of the cells that meet the curve fail, against 1.8-11.6% with chart-flat faces; the area agrees with Wirtinger's theorem to within 0.15%; and, unlike a box in an affine chart at equal resolution, the mesh covers the whole curve.
+
+Comments:
+23 pages, 4 figures. Code: https://github.com/vinicius-mello/vgtl2.0 and https://github.com/vinicius-mello/lpt. Interactive viewer: https://vinicius-mello.github.io/riemann/
+
+Primary category:
+cs.CG (Computational Geometry)
+
+Cross-lists (suggested):
+math.AG (Algebraic Geometry), cs.GR (Graphics)
+
+MSC-class (if cross-listed to math):
+65D18 (Primary); 14Q05, 57Q15 (Secondary)
+
+ACM-class:
+I.3.5; F.2.2
+
+License (to choose):
+CC BY 4.0 is the most common choice for a preprint you may later publish; check the target venue's policy first.
