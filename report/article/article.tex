@@ -124,10 +124,10 @@ We triangulate $\CP^2$ itself and refine it adaptively around $C$.
 \item The mesh is pointerless: a cell is a seed index plus an LPT
   code~\cite{atalaymount2007}, and neighbors are computed, not stored
   (\Cref{sec:lpt}).
-\item The curve is followed by continuation and extracted cell by cell
-  from Newton crossings on triangular $2$-faces, each realized as a
-  geodesic cone so that faces glue exactly along their edges
-  (\Cref{sec:extraction}).
+\item The curve is followed by continuation. In each cell, the points
+  where it meets the triangular $2$-faces are found by Newton's method
+  and joined into polygons; each face is realized as a geodesic cone,
+  so that faces glue exactly along their edges (\Cref{sec:extraction}).
 \item The topology of the result is checked, and holes are closed
   (\Cref{sec:topology}).
 \end{itemize}
@@ -1356,8 +1356,8 @@ extraction, not holes.}
 % =====================================================================
 
 We triangulate smooth plane curves intrinsically in $\CP^2$ by adaptive
-Maubach bisection of a balanced seed, Newton crossings on $2$-faces, and
-continuation through a pointerless mesh. Working in $\CP^2$ removes charts,
+Maubach bisection of a balanced seed, continuation through a pointerless
+mesh, and polygons joining the points where the curve meets the $2$-faces. Working in $\CP^2$ removes charts,
 cuts and the special role of infinity. Balance of the seed is what makes
 both bisection and the pointerless neighbor procedure work on a closed
 manifold, and the same code runs unchanged on $\CP^1\times\CP^1$ once its
