@@ -1,3 +1,4 @@
+pdfoutput=1
 \documentclass[11pt]{article}
 
 \usepackage[a4paper,margin=1in]{geometry}
@@ -45,15 +46,13 @@
 \newcommand{\adj}{\mathrm{adj}}
 \newcommand{\col}{\mathfrak{c}}
 \newcommand{\area}{\mathrm{area}}
-% Draft markers for the v3 skeleton; remove before submission.
-\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO:} #1\textbf{]}}}
 \setlength{\emergencystretch}{2em}
 
 \title{\bf Triangulating Plane Algebraic Curves\\ Intrinsically in $\CP^2$}
-\author{Vin\'icius Moreira Mello\\[2pt]
+\author{Vin\'icius Mello\\[2pt]
 {\small Departamento de Matem\'atica, Universidade Federal da Bahia, Salvador, Brazil}\\
 {\small\texttt{vinicius.mello@ufba.br}}}
-\date{Draft v3 -- \today}
+\date{October 2026}
 
 \begin{document}
 \maketitle
@@ -1422,7 +1421,9 @@ The mesh data structures and the example programs are part of
 VGTL~\cite{vgtl}. The LPT codes and their extension to balanced seeds,
 with the test suites of \Cref{sec:lpt}, are in the \texttt{lpt}
 repository~\cite{lptcode}. Scripts regenerating all figures and tables
-are in VGTL's \texttt{report/article/figures}.
+are in VGTL's \texttt{report/article/figures}. The meshes of the experiments
+can be explored interactively, with transparency and clipping planes, at
+\url{https://vinicius-mello.github.io/riemann/}.
 
 \paragraph{Funding.} This research received no specific funding.
 

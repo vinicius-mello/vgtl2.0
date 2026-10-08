@@ -29,7 +29,6 @@ G.~Belda-Ferr{\'\i}n, E.~Ruiz-Giron{\'e}s, A.~Gargallo-Peir{\'o}, and X.~Roca.
 \newblock Conformal marked bisection for local refinement of $n$-dimensional
   unstructured simplicial meshes.
 \newblock {\em Computer-Aided Design}, 154:103419, 2023.
-\newblock verify volume.
 
 \bibitem{bengtssonzyczkowski2017}
 Ingemar Bengtsson and Karol {\.Z}yczkowski.
@@ -58,8 +57,7 @@ J.-D. Boissonnat, S.~Kachanovich, and M.~Wintraecken.
 \bibitem{boissonnatwintraecken2022}
 J.-D. Boissonnat and M.~Wintraecken.
 \newblock The topological correctness of {PL} approximations of isomanifolds.
-\newblock {\em Found. Comput. Math.}, 22:967--1012, 2022.
-\newblock verify pages.
+\newblock {\em Found. Comput. Math.}, 22(4):967--1012, 2022.
 
 \bibitem{bertinireal2017}
 D.~A. Brake, D.~J. Bates, W.~Hao, J.~D. Hauenstein, A.~J. Sommese, and C.~W.
@@ -195,13 +193,13 @@ J.~M. Maubach.
 
 \bibitem{lptcode}
 Vin{\'\i}cius Mello.
-\newblock lpt: pointerless lpt codes for hierarchical simplicial meshes, with
-  the \texttt{glpt} extension to balanced seeds.
+\newblock {lpt}: pointerless {LPT} codes for hierarchical simplicial meshes,
+  with the \texttt{glpt} extension to balanced seeds.
 \newblock \url{https://github.com/vinicius-mello/lpt}, 2026.
 
 \bibitem{vgtl}
 Vin{\'\i}cius Mello.
-\newblock {VGTL}: a generic c++ library for simplicial and semi-simplicial
+\newblock {VGTL}: a generic {C++} library for simplicial and semi-simplicial
   complexes.
 \newblock \url{https://github.com/vinicius-mello/vgtl2.0}, 2026.
 
@@ -227,7 +225,6 @@ M.~Nieser, K.~Poelke, and K.~Polthier.
 \newblock Automatic generation of {Riemann} surface meshes.
 \newblock In {\em Advances in Geometric Modeling and Processing (GMP 2010)},
   volume 6130 of {\em LNCS}, pages 161--178, 2010.
-\newblock verify pages.
 
 \bibitem{pascucci2002}
 V.~Pascucci.
@@ -269,12 +266,10 @@ C.~T. Traxler.
 C.~Weigle and D.~C. Banks.
 \newblock Complex-valued contour meshing.
 \newblock In {\em Proc. IEEE Visualization '96}, pages 173--180, 1996.
-\newblock verify pages.
 
 \bibitem{weissdefloriani2011}
 K.~Weiss and L.~De Floriani.
 \newblock Simplex and diamond hierarchies: models and applications.
 \newblock {\em Comput. Graph. Forum}, 30(8):2127--2155, 2011.
-\newblock verify pages.
 
 \end{thebibliography}
