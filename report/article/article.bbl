@@ -105,6 +105,11 @@ Seth Dutter.
 \newblock Visualization of complex projective curves.
 \newblock {\em arXiv:2608.04323}, 2026.
 
+\bibitem{dvw2015}
+Ramsay Dyer, Gert Vegter, and Mathijs Wintraecken.
+\newblock Riemannian simplices and triangulations.
+\newblock {\em Geom. Dedicata}, 179(1):91--138, 2015.
+
 \bibitem{sa2015adaptive}
 Asla~Medeiros e~S{\'a}, Vin{\'\i}cius~Moreira Mello, Karina~Rodriguez
   Echavarria, and Derek Covill.
@@ -243,6 +248,11 @@ M.~Reuter, T.~S. Mikkelsen, E.~C. Sherbrooke, T.~Maekawa, and N.~M.
 \newblock Solving nonlinear polynomial systems in the barycentric {Bernstein}
   basis.
 \newblock {\em The Visual Computer}, 24:187--200, 2008.
+
+\bibitem{sander2012}
+Oliver Sander.
+\newblock Geodesic finite elements on simplicial grids.
+\newblock {\em Int. J. Numer. Methods Eng.}, 92(12):999--1025, 2012.
 
 \bibitem{stevenson2008}
 R.~Stevenson.

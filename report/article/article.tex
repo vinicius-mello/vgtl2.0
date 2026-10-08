@@ -672,6 +672,25 @@ lies on it. We use
 as barycentric coordinates on the face; on each edge they reduce to the
 linear parameter.
 
+The flat triangle spanned by representatives of $A,B,C$ in $\C^3$ is
+not an option either: its edges are minimizing geodesics only if the
+three products $\langle A,B\rangle$, $\langle B,C\rangle$,
+$\langle A,C\rangle$ are real and positive, and the phase of
+$\langle A,B\rangle\langle B,C\rangle\langle C,A\rangle$, the Bargmann
+invariant of the triangle, does not depend on the representatives. When
+it is not zero, no choice aligns all three pairs at once. The cone
+avoids this by realigning along $t$. A chart-free and symmetric
+alternative is the Riemannian simplex, whose point with barycentric
+coordinates $\lambda$ is the weighted Karcher mean of the vertices, the
+minimizer of $\sum_i\lambda_i\,d(x,v_i)^2$~\cite{sander2012,dvw2015}.
+Its faces are Riemannian simplices too, so neighboring faces glue as
+well, but every point costs an iterative minimization, and Newton's
+method for $F=0$ evaluates many points on each face. The geodesic cone
+is in closed form, two linear combinations and two phase alignments per
+point. Its price is asymmetry, since the apex $A$ is special; the global
+order of the vertices makes that choice the same in every cell, and its
+boundary, the three geodesics, is symmetric anyway.
+
 \begin{proposition}\label[proposition]{prop:parity}
 Let $T$ be a tetrahedral facet of the mesh whose four realized faces lie
 in a geodesic ball of radius less than $\pi/2$. If $C$ meets these faces
