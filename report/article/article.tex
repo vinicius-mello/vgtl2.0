@@ -718,7 +718,8 @@ through the facets. The extraction follows these dimensions upward.
   make the facet \emph{irregular}.
 \item \emph{Polygons.} The arcs form a graph on the crossings of the cell.
   If every node has degree $2$, the graph is a disjoint union of cycles,
-  each with $3$ to $5$ nodes, and each cycle is output as one polygon.
+  each with $3$ to $5$ nodes, and each cycle is output as one polygon,
+  oriented by the sign of the Kähler form $\omega$ on it, that is, by the complex orientation of $C$.
 \end{itemize}
 A crossing on an edge or at a vertex, up to a tolerance, is identified by
 that edge or vertex, so that all cells containing it agree on its
