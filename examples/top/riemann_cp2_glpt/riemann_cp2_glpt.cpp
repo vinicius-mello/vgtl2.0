@@ -1252,6 +1252,25 @@ int main(int argc, char* argv[]) {
 			out<<"\n";
 		}
 		cout<<"wrote "<<obj_path<<": "<<vert_pts.size()<<" vertices, "<<faces_out.size()<<" faces"<<endl;
+	} else if(g_forced_chart>=0 && g_genus_check) {
+		// One fixed chart: the projection is a function of the point, so the
+		// vertices of the combinatorial complex can be shared, as in alpha
+		// mode (merging by projected coordinates instead would wrongly join
+		// distinct points with the same image, e.g. +-w over real z with
+		// Re w=0).
+		out<<"# projected via the fixed affine chart "<<g_forced_chart<<" (Re a, Im a, Re b), shared vertices\n";
+		if(cutoff<1e299) out<<"# cutoff: polygons with a vertex farther than "<<cutoff<<" from the origin dropped\n";
+		std::vector<int> idx(vert_pts.size(),-1); std::vector<vec3d> vs; std::vector<std::vector<int> > fs;
+		for(auto& f: faces_out) {
+			bool clip=false; for(int x: f) { double q[3]; flat_projection(vert_pts[x],g_forced_chart,q); if(sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2])>cutoff) clip=true; }
+			if(clip) continue;
+			std::vector<int> face;
+			for(int x: f) { if(idx[x]<0) { double q[3]; flat_projection(vert_pts[x],g_forced_chart,q); vec3d w; w.v[0]=q[0]; w.v[1]=q[1]; w.v[2]=q[2]; idx[x]=(int)vs.size(); vs.push_back(w); } face.push_back(idx[x]); }
+			fs.push_back(face);
+		}
+		for(auto& w: vs) out<<"v "<<w.v[0]<<" "<<w.v[1]<<" "<<w.v[2]<<"\n";
+		for(auto& f: fs) { out<<"f"; for(int x: f) out<<" "<<(x+1); out<<"\n"; }
+		cout<<"wrote "<<obj_path<<": "<<vs.size()<<" vertices, "<<fs.size()<<" faces (shared vertices, chart "<<g_forced_chart<<")"<<endl;
 	} else {
 		out<<"# projected via per-polygon best affine chart (Re a, Im a, Re b)\n";
 		if(cutoff<1e299) out<<"# cutoff: polygons with a vertex farther than "<<cutoff<<" from the origin dropped\n";
